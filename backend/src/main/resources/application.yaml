@@ -29,6 +29,7 @@ app:
     session-cookie-name: ${SESSION_COOKIE_NAME:__Host-se214_session}
     session-max-age-seconds: ${SESSION_MAX_AGE_SECONDS:31536000}
     csrf-cookie-name: ${CSRF_COOKIE_NAME:__Host-se214_csrf}
+    csrf-hmac-secret: ${CSRF_HMAC_SECRET:THAY_BANG_CHUOI_BI_MAT_CSRF_LOCAL_32_BYTES}
 
 supabase:
   url: ${SUPABASE_URL:}
