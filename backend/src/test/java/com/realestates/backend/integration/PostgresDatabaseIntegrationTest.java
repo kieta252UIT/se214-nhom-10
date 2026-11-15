@@ -3,12 +3,12 @@ package com.realestates.backend.integration;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import com.realestates.backend.common.AbstractPostgresIntegrationTest;
 import com.realestates.backend.database.TestDatabaseSettings;
 import java.util.UUID;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ContextConfiguration;
@@ -16,14 +16,15 @@ import org.springframework.transaction.annotation.Transactional;
 
 /**
  * Cấp độ 2: Kiểm thử tích hợp cơ sở dữ liệu (Database Integration Testing) theo IEEE 829 - Mục 7.2.
- * Sử dụng Testcontainers chạy PostgreSQL 17 thật (không dùng H2).
+ * Sử dụng PostgreSQL 17 thật (qua TestDatabaseSettings và CI service container / Docker local).
  * Kiểm tra:
  * - Flyway Migration khởi tạo schema sạch.
  * - Ràng buộc toàn vẹn: CHECK (hạn mức <= 3, BR-09), Unique index, Foreign Key.
  * - Giao dịch ACID và cơ chế Transaction Rollback.
  */
+@SpringBootTest
 @ContextConfiguration(initializers = TestDatabaseSettings.SpringInitializer.class)
-class PostgresDatabaseIntegrationTest extends AbstractPostgresIntegrationTest {
+class PostgresDatabaseIntegrationTest {
 
     @Autowired
     private JdbcTemplate jdbcTemplate;

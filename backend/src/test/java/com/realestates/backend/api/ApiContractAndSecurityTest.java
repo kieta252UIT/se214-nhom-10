@@ -8,7 +8,6 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-import com.realestates.backend.common.AbstractPostgresIntegrationTest;
 import com.realestates.backend.database.TestDatabaseSettings;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -32,7 +31,7 @@ import org.springframework.web.filter.ForwardedHeaderFilter;
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @ContextConfiguration(initializers = TestDatabaseSettings.SpringInitializer.class)
-class ApiContractAndSecurityTest extends AbstractPostgresIntegrationTest {
+class ApiContractAndSecurityTest {
 
     @Autowired
     private WebApplicationContext webApplicationContext;
