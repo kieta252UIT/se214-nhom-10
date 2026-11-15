@@ -3,7 +3,9 @@ package com.realestates.backend.concurrency;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.realestates.backend.database.TestDatabaseSettings;
+import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -23,7 +25,8 @@ import org.springframework.test.context.ContextConfiguration;
  * - Dùng CountDownLatch(1) làm chốt xuất phát để mọi luồng bắn câu lệnh vào PostgreSQL 17 tại cùng mili-giây t0.
  * Kịch bản:
  * - Concurrency-01 (TS1-29): Tài khoản đã có 2 tin trong tháng, bắn đồng thời 2 request tạo tin mới.
- *   Kỳ vọng: Đúng 1 luồng cập nhật thành công, tổng số tin trong tháng đạt tối đa đúng 3 (BR-09), không bị race condition vượt quá hạn mức.
+ *   Kỳ vọng: Đúng 1 luồng cập nhật thành công (affectedRows == 1), đúng 1 luồng bị chặn do hết hạn mức (affectedRows == 0),
+ *   tổng số tin trong tháng đạt tối đa đúng 3 (BR-09), không bị race condition và không có ngoại lệ hệ thống.
  */
 @SpringBootTest
 @ContextConfiguration(initializers = TestDatabaseSettings.SpringInitializer.class)
@@ -61,6 +64,7 @@ class ConcurrencyRaceConditionTest {
 
             AtomicInteger successCount = new AtomicInteger(0);
             AtomicInteger rejectedCount = new AtomicInteger(0);
+            List<Throwable> exceptions = new CopyOnWriteArrayList<>();
 
             for (int i = 0; i < numberOfThreads; i++) {
                 executor.submit(() -> {
@@ -77,11 +81,11 @@ class ConcurrencyRaceConditionTest {
 
                         if (affectedRows == 1) {
                             successCount.incrementAndGet();
-                        } else {
+                        } else if (affectedRows == 0) {
                             rejectedCount.incrementAndGet();
                         }
-                    } catch (Exception e) {
-                        rejectedCount.incrementAndGet();
+                    } catch (Throwable t) {
+                        exceptions.add(t);
                     } finally {
                         endGate.countDown();
                     }
@@ -94,6 +98,7 @@ class ConcurrencyRaceConditionTest {
             executor.shutdown();
 
             // 4. Kiểm tra kết quả bất biến:
+            assertThat(exceptions).as("Các luồng không được phát sinh lỗi kết nối hoặc ngoại lệ hệ thống").isEmpty();
             assertThat(completed).isTrue();
             assertThat(successCount.get()).isEqualTo(1);
             assertThat(rejectedCount.get()).isEqualTo(1);

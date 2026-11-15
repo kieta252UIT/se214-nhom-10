@@ -26,7 +26,7 @@ Hệ thống áp dụng mô hình **Kim tự tháp kiểm thử (Test Pyramid)**
 - **Database Integration Testing (Mục 7.2):** Spring Boot Test, Flyway Migration, `TestDatabaseSettings`. Chạy trực tiếp trên PostgreSQL 17 thật (qua CI service container hoặc Docker container cục bộ), tuyệt đối không dùng H2 in-memory nhằm bảo toàn các tính năng khóa dòng (`SELECT ... FOR UPDATE`), số thực chính xác `NUMERIC`, ràng buộc CHECK và giao dịch ACID.
 - **API Contract & Security Testing (Mục 7.3):** Spring MockMvc, RestAssured, Bean Validation (`@Valid`). Kiểm tra hợp đồng DTO, mã trạng thái HTTP chuẩn, format lỗi RFC 7807 (`ApiErrorResponse`), CSRF và HTTP headers.
 - **Concurrency & Race Condition Testing (Mục 7.5):** Java `ExecutorService` phối hợp `CountDownLatch(1)` chạy trên PostgreSQL 17 thật để bắt triệt để các lỗi tranh chấp tài nguyên (đua hạn mức đăng tin TS1-29, 2 KDV duyệt cùng lúc TS1-55). Tự động dọn dẹp dữ liệu thử sau mỗi lần chạy trong khối `try ... finally` để giữ sạch CSDL.
-- **Độ bao phủ mã nguồn (Code Coverage):** JaCoCo Maven Plugin đo lường nhánh nghiệp vụ (Branch Coverage $\ge 90\%$).
+- **Độ bao phủ mã nguồn (Code Coverage):** JaCoCo Maven Plugin đo lường nhánh nghiệp vụ (Branch Coverage $\ge 90\%$). Cấu hình Surefire bảo toàn `@{argLine}` để tạo báo cáo `jacoco.exec`.
 
 ---
 
@@ -136,7 +136,37 @@ backend/
 
 ## 4. HƯỚNG DẪN CÂU LỆNH THỰC THI (TEST EXECUTION COMMANDS)
 
-Mở terminal tại thư mục `backend/` và thực thi các lệnh tương ứng (đảm bảo đã thiết lập 4 biến môi trường):
+> [!IMPORTANT]
+> **ĐIỀU KIỆN TIÊN QUYẾT BẮT BUỘC TRƯỚC KHI CHẠY TEST TÍCH HỢP / API / CONCURRENCY:**
+>
+> 1. **Khởi chạy container PostgreSQL 17 (nếu chưa chạy):**
+>    ```bash
+>    docker run -d --name postgres-test -p 5432:5432 -e POSTGRES_DB=se214_test -e POSTGRES_USER=se214_test -e POSTGRES_PASSWORD=local-ci-only postgres:17
+>    ```
+> 2. **Thiết lập 4 biến môi trường (Tên database BẮT BUỘC có đuôi `_test`):**
+>    - **PowerShell:**
+>      ```powershell
+>      $env:ALLOW_TEST_SCHEMA_RESET = "true"
+>      $env:DB_TEST_URL = "jdbc:postgresql://localhost:5432/se214_test"
+>      $env:DB_TEST_USERNAME = "se214_test"
+>      $env:DB_TEST_PASSWORD = "local-ci-only"
+>      ```
+>    - **Command Prompt (CMD):**
+>      ```cmd
+>      set ALLOW_TEST_SCHEMA_RESET=true
+>      set DB_TEST_URL=jdbc:postgresql://localhost:5432/se214_test
+>      set DB_TEST_USERNAME=se214_test
+>      set DB_TEST_PASSWORD=local-ci-only
+>      ```
+>    - **Git Bash / Linux / macOS:**
+>      ```bash
+>      export ALLOW_TEST_SCHEMA_RESET=true
+>      export DB_TEST_URL=jdbc:postgresql://localhost:5432/se214_test
+>      export DB_TEST_USERNAME=se214_test
+>      export DB_TEST_PASSWORD=local-ci-only
+>      ```
+
+Mở terminal tại thư mục `backend/` và thực thi các lệnh tương ứng:
 
 ### 4.1. Chạy toàn bộ các ca kiểm thử (Full Test Suite)
 Lệnh này sẽ biên dịch, chạy toàn bộ Unit test, API test, Database Integration test, Flyway migration test và Concurrency test:
@@ -218,7 +248,7 @@ Các bước thực hiện trong CI:
 
 1. **Lỗi `IllegalStateException: Test yêu cầu ALLOW_TEST_SCHEMA_RESET=true trên DB thử riêng`:**
    - *Nguyên nhân:* Chưa khai báo biến môi trường cho phép reset schema kiểm thử.
-   - *Khắc phục:* Thiết lập biến môi trường `ALLOW_TEST_SCHEMA_RESET=true` (xem hướng dẫn ở Mục 2).
+   - *Khắc phục:* Thiết lập biến môi trường `ALLOW_TEST_SCHEMA_RESET=true` (xem hướng dẫn ở Mục 2 & Mục 4).
 
 2. **Lỗi `IllegalStateException: Từ chối chạy test: tên DB thực tế phải kết thúc bằng _test`:**
    - *Nguyên nhân:* Tên database trong chuỗi kết nối `DB_TEST_URL` không kết thúc bằng `_test`.
@@ -226,11 +256,11 @@ Các bước thực hiện trong CI:
 
 3. **Lỗi `IllegalStateException: Thiếu biến môi trường thử DB_TEST_...`:**
    - *Nguyên nhân:* Chưa khai báo đủ các biến `DB_TEST_URL`, `DB_TEST_USERNAME`, `DB_TEST_PASSWORD`.
-   - *Khắc phục:* Thiết lập đầy đủ 4 biến môi trường như hướng dẫn ở Mục 2.
+   - *Khắc phục:* Thiết lập đầy đủ 4 biến môi trường như hướng dẫn ở Mục 2 & Mục 4.
 
 4. **Lỗi `Connection to localhost:5432 refused`:**
    - *Nguyên nhân:* Container PostgreSQL 17 chưa được khởi động hoặc cổng 5432 bị chiếm dụng.
-   - *Khắc phục:* Chạy lệnh `docker ps` để kiểm tra container `postgres-test` đang chạy; nếu chưa, khởi động lại container theo lệnh ở Mục 2.
+   - *Khắc phục:* Chạy lệnh `docker ps` để kiểm tra container `postgres-test` đang chạy; nếu chưa, khởi động lại container theo lệnh ở Mục 2 & Mục 4.
 
 5. **Cần làm sạch cache khi sửa đổi migration SQL:**
    - Chạy lệnh `.\mvnw.cmd clean test-compile` để làm sạch target và biên dịch lại các tài nguyên mới.

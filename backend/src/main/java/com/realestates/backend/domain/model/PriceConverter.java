@@ -50,33 +50,32 @@ public final class PriceConverter {
 
         switch (donVi) {
             case TONG_VND -> {
-                giaTong = giaGoc;
-                giaM2 = giaTong.divide(dienTich, 2, RoundingMode.HALF_UP);
+                giaTong = giaGoc.setScale(2, RoundingMode.HALF_UP);
+                giaM2 = giaGoc.divide(dienTich, 2, RoundingMode.HALF_UP);
             }
             case VND_M2 -> {
-                giaM2 = giaGoc;
-                giaTong = giaM2.multiply(dienTich).setScale(2, RoundingMode.HALF_UP);
+                giaM2 = giaGoc.setScale(2, RoundingMode.HALF_UP);
+                giaTong = giaGoc.multiply(dienTich).setScale(2, RoundingMode.HALF_UP);
             }
             case VND_THANG -> {
-                giaTong = giaGoc;
-                giaM2 = giaTong.divide(dienTich, 2, RoundingMode.HALF_UP);
+                giaTong = giaGoc.setScale(2, RoundingMode.HALF_UP);
+                giaM2 = giaGoc.divide(dienTich, 2, RoundingMode.HALF_UP);
             }
             case VND_NGAY -> {
                 giaTong = giaGoc.multiply(DAYS_IN_MONTH).setScale(2, RoundingMode.HALF_UP);
-                giaM2 = giaTong.divide(dienTich, 2, RoundingMode.HALF_UP);
+                giaM2 = giaGoc.multiply(DAYS_IN_MONTH).divide(dienTich, 2, RoundingMode.HALF_UP);
             }
             case VND_NAM -> {
                 giaTong = giaGoc.divide(MONTHS_IN_YEAR, 2, RoundingMode.HALF_UP);
-                giaM2 = giaTong.divide(dienTich, 2, RoundingMode.HALF_UP);
+                giaM2 = giaGoc.divide(MONTHS_IN_YEAR.multiply(dienTich), 2, RoundingMode.HALF_UP);
             }
             case VND_M2_NGAY -> {
-                BigDecimal giaM2Thang = giaGoc.multiply(DAYS_IN_MONTH).setScale(2, RoundingMode.HALF_UP);
-                giaM2 = giaM2Thang;
-                giaTong = giaM2.multiply(dienTich).setScale(2, RoundingMode.HALF_UP);
+                giaM2 = giaGoc.multiply(DAYS_IN_MONTH).setScale(2, RoundingMode.HALF_UP);
+                giaTong = giaGoc.multiply(DAYS_IN_MONTH).multiply(dienTich).setScale(2, RoundingMode.HALF_UP);
             }
             case VND_M2_THANG -> {
-                giaM2 = giaGoc;
-                giaTong = giaM2.multiply(dienTich).setScale(2, RoundingMode.HALF_UP);
+                giaM2 = giaGoc.setScale(2, RoundingMode.HALF_UP);
+                giaTong = giaGoc.multiply(dienTich).setScale(2, RoundingMode.HALF_UP);
             }
             default -> throw new UnsupportedOperationException("Chưa hỗ trợ đơn vị: " + donVi);
         }
