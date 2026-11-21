@@ -124,7 +124,7 @@ class PriceConverterUnitTest {
     }
 
     @Test
-    @DisplayName("TIN-P-R6: Thuê 0.3m2 - 10.000.000,01 VND_NAM -> Không làm tròn trung gian, Đơn giá 2.777.777,78/m2")
+    @DisplayName("TIN-P-R6: Thuê 0.3m2 - 10.000.000,01 VND_NAM -> Không bị sai số do làm tròn trung gian")
     void shouldConvertTinPR6WithoutIntermediateRounding() {
         KetQuaQuyDoiGia result = PriceConverter.quyDoi(
                 new BigDecimal("10000000.01"),
