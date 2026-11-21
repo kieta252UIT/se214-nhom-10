@@ -3,7 +3,6 @@ package com.realestates.backend.concurrency;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.realestates.backend.database.TestDatabaseSettings;
-import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
@@ -25,8 +24,7 @@ import org.springframework.test.context.ContextConfiguration;
  * - Dùng CountDownLatch(1) làm chốt xuất phát để mọi luồng bắn câu lệnh vào PostgreSQL 17 tại cùng mili-giây t0.
  * Kịch bản:
  * - Concurrency-01 (TS1-29): Tài khoản đã có 2 tin trong tháng, bắn đồng thời 2 request tạo tin mới.
- *   Kỳ vọng: Đúng 1 luồng cập nhật thành công (affectedRows == 1), đúng 1 luồng bị chặn do hết hạn mức (affectedRows == 0),
- *   tổng số tin trong tháng đạt tối đa đúng 3 (BR-09), không bị race condition và không có ngoại lệ hệ thống.
+ *   Kỳ vọng: Đúng 1 luồng cập nhật thành công, tổng số tin trong tháng đạt tối đa đúng 3 (BR-09), không bị race condition vượt quá hạn mức.
  */
 @SpringBootTest
 @ContextConfiguration(initializers = TestDatabaseSettings.SpringInitializer.class)
@@ -38,16 +36,14 @@ class ConcurrencyRaceConditionTest {
     @Test
     @DisplayName("CONCURRENCY-01 / TS1-29: Đua tạo tin khi đã có 2 tin trong tháng -> Đúng 1 luồng thành công, tổng = 3")
     void shouldHandleConcurrentListingCreationsAtomically() throws InterruptedException {
+        // 1. Chuẩn bị dữ liệu thử: Tài khoản có sẵn 2 tin trong tháng 2026-11
         UUID userId = UUID.randomUUID();
-        UUID authUserId = UUID.randomUUID();
-
         try {
-            // 1. Chuẩn bị dữ liệu thử: Tài khoản có sẵn 2 tin trong tháng 2026-11
             jdbcTemplate.update(
-                    "INSERT INTO se214.tai_khoan (id, supabase_auth_user_id, email, ho_ten, vai_tro, trang_thai) " +
-                    "VALUES (?, ?, ?, 'User Race Test', 'nguoi_dung', 'hoat_dong')",
+                    "INSERT INTO se214.tai_khoan (id, supabase_auth_user_id, email, ho_ten) " +
+                    "VALUES (?, ?, ?, 'User Race Test')",
                     userId,
-                    authUserId,
+                    UUID.randomUUID(),
                     "user_race_" + UUID.randomUUID() + "@bds-test.local"
             );
 
@@ -64,7 +60,7 @@ class ConcurrencyRaceConditionTest {
 
             AtomicInteger successCount = new AtomicInteger(0);
             AtomicInteger rejectedCount = new AtomicInteger(0);
-            List<Throwable> exceptions = new CopyOnWriteArrayList<>();
+            CopyOnWriteArrayList<Throwable> exceptions = new CopyOnWriteArrayList<>();
 
             for (int i = 0; i < numberOfThreads; i++) {
                 executor.submit(() -> {
@@ -84,8 +80,8 @@ class ConcurrencyRaceConditionTest {
                         } else if (affectedRows == 0) {
                             rejectedCount.incrementAndGet();
                         }
-                    } catch (Throwable t) {
-                        exceptions.add(t);
+                    } catch (Throwable e) {
+                        exceptions.add(e);
                     } finally {
                         endGate.countDown();
                     }
@@ -98,8 +94,8 @@ class ConcurrencyRaceConditionTest {
             executor.shutdown();
 
             // 4. Kiểm tra kết quả bất biến:
-            assertThat(exceptions).as("Các luồng không được phát sinh lỗi kết nối hoặc ngoại lệ hệ thống").isEmpty();
             assertThat(completed).isTrue();
+            assertThat(exceptions).as("Các luồng không được phát sinh lỗi kết nối hoặc ngoại lệ hệ thống").isEmpty();
             assertThat(successCount.get()).isEqualTo(1);
             assertThat(rejectedCount.get()).isEqualTo(1);
 
@@ -111,7 +107,7 @@ class ConcurrencyRaceConditionTest {
             );
             assertThat(finalListingCount).isEqualTo(3);
         } finally {
-            // Dọn dẹp dữ liệu thử nghiệm theo đúng thứ tự khóa ngoại (FK)
+            // 5. Dọn dẹp dữ liệu thử nghiệm theo đúng thứ tự khóa ngoại (FK) tránh tồn đọng rác ở local
             jdbcTemplate.update("DELETE FROM se214.han_muc_thang WHERE tai_khoan_id = ?", userId);
             jdbcTemplate.update("DELETE FROM se214.tai_khoan WHERE id = ?", userId);
         }
