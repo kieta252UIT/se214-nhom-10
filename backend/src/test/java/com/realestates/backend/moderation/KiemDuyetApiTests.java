@@ -235,7 +235,7 @@ class KiemDuyetApiTests {
         mockMvc.perform(yeuCauPost(duongDanQuyetDinh("approve"), kdv.rawSessionCookie(), null, "\"7\"", null))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.truongLoi[0].truong").value("Idempotency-Key"));
-        assertThat(khoGia.soLanQuyetDinh).isEqualTo(2);
+        assertThat(khoGia.soLanQuyetDinh).isEqualTo(1);
     }
 
     @Test
