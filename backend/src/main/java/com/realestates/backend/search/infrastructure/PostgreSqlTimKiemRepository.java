@@ -5,11 +5,8 @@ import com.realestates.backend.search.domain.BoLocTimKiem;
 import com.realestates.backend.search.domain.ConTroTimKiem;
 import com.realestates.backend.search.domain.SapXepTin;
 import com.realestates.backend.search.domain.TimKiemRepository;
-import java.sql.ResultSet;
-import java.sql.SQLException;
 import java.util.List;
 import java.util.Objects;
-import java.util.UUID;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
@@ -25,14 +22,9 @@ import org.springframework.stereotype.Repository;
 @ConditionalOnProperty(name = "app.repository.type", havingValue = "postgres")
 public class PostgreSqlTimKiemRepository implements TimKiemRepository {
 
-    private static final String CAC_COT = """
-            t.id AS tin_id, p.tieu_de, p.loai_giao_dich, p.loai_bds, p.khu_vuc, p.dia_chi,
-                   p.gia_goc, p.don_vi_gia, p.dien_tich_m2, t.ngay_dang,
-                   (SELECT a.khoa_anh_hien_thi FROM se214.anh_tin a
-                     WHERE a.phien_ban_tin_id = p.id AND a.trang_thai = 'da_gan'
-                     ORDER BY a.thu_tu ASC LIMIT 1) AS anh_dai_dien""";
+    private static final String CAC_COT = TinCongKhaiSql.cacCotTomTat("t", "p");
 
-    private static final RowMapper<DongTin> ROW_MAPPER = PostgreSqlTimKiemRepository::anhXa;
+    private static final RowMapper<DongTin> ROW_MAPPER = TinCongKhaiSql.ANH_XA_DONG_TIN;
 
     private final NamedParameterJdbcTemplate jdbc;
 
@@ -99,9 +91,7 @@ public class PostgreSqlTimKiemRepository implements TimKiemRepository {
     }
 
     private static String tuKhoaTin(String t, String p) {
-        return "FROM se214.tin_bat_dong_san " + t + "\n"
-                + "JOIN se214.phien_ban_tin " + p + " ON " + p + ".id = " + t + ".phien_ban_da_duyet_id AND "
-                + p + ".tin_id = " + t + ".id\n";
+        return TinCongKhaiSql.tuKhoaTin(t, p);
     }
 
     /** Hiển thị công khai + bộ lọc; bắt đầu bằng WHERE, các điều kiện sau nối bằng AND. */
@@ -112,8 +102,7 @@ public class PostgreSqlTimKiemRepository implements TimKiemRepository {
             String t,
             String p
     ) {
-        sql.append("WHERE ").append(t).append(".phien_ban_da_duyet_id IS NOT NULL")
-                .append("\n  AND ").append(t).append(".trang_thai NOT IN ('da_xoa', 'bi_go_vi_pham')");
+        sql.append("WHERE ").append(TinCongKhaiSql.dieuKienCongKhai(t));
         if (boLoc.loaiGiaoDich() != null) {
             sql.append("\n  AND ").append(p).append(".loai_giao_dich = :loaiGiaoDich");
             tham.addValue("loaiGiaoDich", boLoc.loaiGiaoDich().getGiaTri());
@@ -156,8 +145,7 @@ public class PostgreSqlTimKiemRepository implements TimKiemRepository {
             String p
     ) {
         themDieuKienLoc(sql, tham, boLoc, t, p);
-        sql.append("\n  AND EXISTS (SELECT 1 FROM se214.goi_day_tin g WHERE g.tin_id = ").append(t).append(".id")
-                .append(" AND g.trang_thai = 'dang_hoat_dong' AND g.het_han_luc > now())");
+        sql.append("\n  AND ").append(TinCongKhaiSql.coGoiTaiTro(t));
     }
 
     private static String bieuThucKhoa(SapXepTin sapXep, BoLocTimKiem boLoc, String p, String t) {
@@ -168,22 +156,5 @@ public class PostgreSqlTimKiemRepository implements TimKiemRepository {
             return BieuThucGiaSql.theoKieu(boLoc.kieuGia(), p);
         }
         return p + ".dien_tich_m2";
-    }
-
-    private static DongTin anhXa(ResultSet rs, int rowNum) throws SQLException {
-        return new DongTin(
-                rs.getObject("tin_id", UUID.class),
-                rs.getString("tieu_de"),
-                rs.getString("loai_giao_dich"),
-                rs.getString("loai_bds"),
-                rs.getString("khu_vuc"),
-                rs.getString("dia_chi"),
-                rs.getBigDecimal("gia_goc"),
-                rs.getString("don_vi_gia"),
-                rs.getBigDecimal("dien_tich_m2"),
-                rs.getString("anh_dai_dien"),
-                rs.getTimestamp("ngay_dang").toInstant(),
-                rs.getString("khoa_sap_xep")
-        );
     }
 }

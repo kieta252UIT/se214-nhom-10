@@ -131,7 +131,7 @@ public class TimKiemTinService {
         }
     }
 
-    static TinTimKiemItem chuyenThanhItem(DongTin dong, boolean laTaiTro) {
+    public static TinTimKiemItem chuyenThanhItem(DongTin dong, boolean laTaiTro) {
         DonViGiaTin donViGia = DonViGiaTin.tuGiaTri(dong.donViGia())
                 .orElseThrow(() -> new IllegalStateException("Đơn vị giá không hợp lệ: " + dong.donViGia()));
         PriceConverter.KetQuaQuyDoiGia quyDoi = PriceConverter.quyDoi(
