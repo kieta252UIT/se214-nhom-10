@@ -14,6 +14,7 @@ import com.realestates.backend.listing.application.QuanLyTinService;
 import com.realestates.backend.listing.application.TinDangService;
 import com.realestates.backend.listing.domain.AnhTinRepository;
 import com.realestates.backend.listing.domain.TinDangRepository;
+import com.realestates.backend.listing.dto.TinGhiKetQua;
 import com.realestates.backend.listing.exception.ListingConflictException;
 import com.realestates.backend.listing.exception.ListingPreconditionException;
 import com.realestates.backend.moderation.KiemDuyetPgTestSupport;
@@ -21,12 +22,10 @@ import com.realestates.backend.moderation.KiemDuyetPgTestSupport.TaiKhoanSession
 import com.realestates.backend.moderation.KiemDuyetPgTestSupport.TinCho;
 import com.realestates.backend.moderation.application.KiemDuyetService;
 import com.realestates.backend.moderation.domain.KiemDuyetRepository;
-import com.realestates.backend.moderation.dto.KetQuaQuyetDinh;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
-import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.Callable;
 import org.junit.jupiter.api.AfterEach;
@@ -119,7 +118,7 @@ class KiemDuyetConcurrencyTest {
     }
 
     @Test
-    @DisplayName("CONCURRENCY-KD-01: hai kiểm duyệt viên cùng quyết định một phiên bản -> đúng 1 thành công, 1 nhật ký; bên thua nhận lỗi, thử lại với ETag mới nhận DA_CO_QUYET_DINH")
+    @DisplayName("CONCURRENCY-KD-01: hai kiểm duyệt viên cùng quyết định một phiên bản -> đúng 1 thành công, 1 nhật ký; bên thua nhận lỗi, thử lại với ETag mới nhận TRANG_THAI_KHONG_HOP_LE")
     void haiKiemDuyetVienCungQuyetDinh() throws Exception {
         for (boolean duyetCaHai : new boolean[]{true, false}) {
             TaiKhoanSession chu = ht.taoTaiKhoan(VaiTroTaiKhoan.NGUOI_DUNG);
@@ -128,10 +127,10 @@ class KiemDuyetConcurrencyTest {
             TinCho tin = ht.taoTinMoiChoDuyet(chu);
 
             List<String> ketQua = ht.chayDongThoi(List.of(
-                    nhan(() -> kiemDuyetService.pheDuyet(kdv1.rawCookie(), tin.tinId(), tin.phienBanId(), "dong-thoi-1", "\"0\"")),
+                    nhan(() -> ht.pheDuyet(kdv1, tin.tinId(), tin.phienBanId(), "dong-thoi-1", "\"0\"")),
                     nhan(() -> duyetCaHai
-                            ? kiemDuyetService.pheDuyet(kdv2.rawCookie(), tin.tinId(), tin.phienBanId(), "dong-thoi-2", "\"0\"")
-                            : kiemDuyetService.tuChoi(kdv2.rawCookie(), tin.tinId(), tin.phienBanId(), "dong-thoi-2", "\"0\"", Map.of("lyDo", "Không đạt")))
+                            ? ht.pheDuyet(kdv2, tin.tinId(), tin.phienBanId(), "dong-thoi-2", "\"0\"")
+                            : ht.tuChoi(kdv2, tin.tinId(), tin.phienBanId(), "dong-thoi-2", "\"0\"", "Không đạt"))
             ));
 
             // Cả hai cùng giữ ETag "0": bên đến sau thấy phien_ban_cap_nhat đã đổi nên nhận 412 PHIEN_BAN_CU.
@@ -145,10 +144,10 @@ class KiemDuyetConcurrencyTest {
             assertThat(ht.phienBanCapNhat(tin.tinId())).isEqualTo(1L);
 
             String etagMoi = ht.etag(tin.tinId());
-            assertThatThrownBy(() -> kiemDuyetService.pheDuyet(kdv1.rawCookie(), tin.tinId(), tin.phienBanId(), "thu-lai-1", etagMoi))
-                    .isInstanceOfSatisfying(ListingConflictException.class, ex -> assertThat(ex.getMaLoi()).isEqualTo("DA_CO_QUYET_DINH"));
-            assertThatThrownBy(() -> kiemDuyetService.pheDuyet(kdv2.rawCookie(), tin.tinId(), tin.phienBanId(), "thu-lai-2", etagMoi))
-                    .isInstanceOfSatisfying(ListingConflictException.class, ex -> assertThat(ex.getMaLoi()).isEqualTo("DA_CO_QUYET_DINH"));
+            assertThatThrownBy(() -> ht.pheDuyet(kdv1, tin.tinId(), tin.phienBanId(), "thu-lai-1", etagMoi))
+                    .isInstanceOfSatisfying(ListingConflictException.class, ex -> assertThat(ex.getMaLoi()).isEqualTo("TRANG_THAI_KHONG_HOP_LE"));
+            assertThatThrownBy(() -> ht.pheDuyet(kdv2, tin.tinId(), tin.phienBanId(), "thu-lai-2", etagMoi))
+                    .isInstanceOfSatisfying(ListingConflictException.class, ex -> assertThat(ex.getMaLoi()).isEqualTo("TRANG_THAI_KHONG_HOP_LE"));
             assertThat(ht.dem("SELECT count(*) FROM se214.nhat_ky_kiem_toan WHERE tin_id = ? AND hanh_dong IN ('phe_duyet', 'tu_choi')", tin.tinId()))
                     .isEqualTo(1);
         }
@@ -162,31 +161,30 @@ class KiemDuyetConcurrencyTest {
         TinCho tinDuyet = ht.taoTinMoiChoDuyet(chu);
         TinCho tinTuChoi = ht.taoTinMoiChoDuyet(chu);
 
-        List<KetQuaQuyetDinh> cacKetQuaDuyet = ht.chayDongThoi(List.of(
-                () -> kiemDuyetService.pheDuyet(kdv.rawCookie(), tinDuyet.tinId(), tinDuyet.phienBanId(), "cung-khoa-duyet", "\"0\""),
-                () -> kiemDuyetService.pheDuyet(kdv.rawCookie(), tinDuyet.tinId(), tinDuyet.phienBanId(), "cung-khoa-duyet", "\"0\""),
-                () -> kiemDuyetService.pheDuyet(kdv.rawCookie(), tinDuyet.tinId(), tinDuyet.phienBanId(), "cung-khoa-duyet", "\"0\""),
-                () -> kiemDuyetService.pheDuyet(kdv.rawCookie(), tinDuyet.tinId(), tinDuyet.phienBanId(), "cung-khoa-duyet", "\"0\"")
+        List<TinGhiKetQua> cacKetQuaDuyet = ht.chayDongThoi(List.of(
+                () -> ht.pheDuyet(kdv, tinDuyet.tinId(), tinDuyet.phienBanId(), "cung-khoa-duyet", "\"0\""),
+                () -> ht.pheDuyet(kdv, tinDuyet.tinId(), tinDuyet.phienBanId(), "cung-khoa-duyet", "\"0\""),
+                () -> ht.pheDuyet(kdv, tinDuyet.tinId(), tinDuyet.phienBanId(), "cung-khoa-duyet", "\"0\""),
+                () -> ht.pheDuyet(kdv, tinDuyet.tinId(), tinDuyet.phienBanId(), "cung-khoa-duyet", "\"0\"")
         ));
         assertThat(cacKetQuaDuyet).hasSize(4);
         assertThat(cacKetQuaDuyet).allSatisfy(kq -> assertThat(kq).isEqualTo(cacKetQuaDuyet.get(0)));
-        assertThat(cacKetQuaDuyet.get(0).ketQuaKiemDuyet()).isEqualTo("da_duyet");
+        assertThat(cacKetQuaDuyet.get(0).trangThai()).isEqualTo("da_duyet");
         assertThat(cacKetQuaDuyet.get(0).phienBanCapNhat()).isEqualTo(1L);
         assertThat(ht.dem("SELECT count(*) FROM se214.nhat_ky_kiem_toan WHERE tin_id = ? AND hanh_dong = 'phe_duyet'", tinDuyet.tinId())).isEqualTo(1);
         assertThat(ht.dem("SELECT count(*) FROM se214.yeu_cau_ghi WHERE tin_ket_qua_id = ? AND loai_thao_tac = 'quyet_dinh'", tinDuyet.tinId())).isEqualTo(1);
         assertThat(ht.phienBanCapNhat(tinDuyet.tinId())).isEqualTo(1L);
 
-        Callable<KetQuaQuyetDinh> tuChoi = () -> kiemDuyetService.tuChoi(
-                kdv.rawCookie(), tinTuChoi.tinId(), tinTuChoi.phienBanId(), "cung-khoa-tu-choi", "\"0\"", Map.of("lyDo", "Không đạt"));
-        List<KetQuaQuyetDinh> cacKetQuaTuChoi = ht.chayDongThoi(List.of(tuChoi, tuChoi, tuChoi));
+        Callable<TinGhiKetQua> tuChoi = () -> ht.tuChoi(kdv, tinTuChoi.tinId(), tinTuChoi.phienBanId(), "cung-khoa-tu-choi", "\"0\"", "Không đạt");
+        List<TinGhiKetQua> cacKetQuaTuChoi = ht.chayDongThoi(List.of(tuChoi, tuChoi, tuChoi));
         assertThat(cacKetQuaTuChoi).allSatisfy(kq -> assertThat(kq).isEqualTo(cacKetQuaTuChoi.get(0)));
-        assertThat(cacKetQuaTuChoi.get(0).ketQuaKiemDuyet()).isEqualTo("bi_tu_choi");
+        assertThat(cacKetQuaTuChoi.get(0).trangThai()).isEqualTo("bi_tu_choi");
         assertThat(ht.dem("SELECT count(*) FROM se214.nhat_ky_kiem_toan WHERE tin_id = ? AND hanh_dong = 'tu_choi'", tinTuChoi.tinId())).isEqualTo(1);
         assertThat(ht.phienBanCapNhat(tinTuChoi.tinId())).isEqualTo(1L);
     }
 
     @Test
-    @DisplayName("CONCURRENCY-KD-03: phê duyệt đua với chủ tin xóa -> hoặc (duyệt rồi mới xóa) hoặc (xóa trước, duyệt nhận TIN_DA_XOA); không bao giờ lệch trạng thái")
+    @DisplayName("CONCURRENCY-KD-03: phê duyệt đua với chủ tin xóa -> hoặc (duyệt rồi mới xóa) hoặc (xóa trước, duyệt với ETag cũ nhận PHIEN_BAN_CU); không bao giờ lệch trạng thái")
     void pheDuyetDuaVoiXoa() throws Exception {
         for (int lan = 0; lan < 5; lan++) {
             TaiKhoanSession chu = ht.taoTaiKhoan(VaiTroTaiKhoan.NGUOI_DUNG);
@@ -195,7 +193,7 @@ class KiemDuyetConcurrencyTest {
             UUID goiId = ht.taoGoi(tin.tinId(), "tam_dung_cho_duyet", null, "2 days");
 
             List<String> ketQua = ht.chayDongThoi(List.of(
-                    nhan(() -> kiemDuyetService.pheDuyet(kdv.rawCookie(), tin.tinId(), tin.phienBanId(), "dua-duyet", "\"0\"")),
+                    nhan(() -> ht.pheDuyet(kdv, tin.tinId(), tin.phienBanId(), "dua-duyet", "\"0\"")),
                     nhan(() -> ht.xoaTin(chu, tin.tinId(), "\"0\""))
             ));
             String ketQuaDuyet = ketQua.get(0);
@@ -207,7 +205,8 @@ class KiemDuyetConcurrencyTest {
                 assertThat(ketQuaXoa).isEqualTo("PHIEN_BAN_CU");
                 ht.xoaTin(chu, tin.tinId(), ht.etag(tin.tinId()));
             } else {
-                assertThat(ketQuaDuyet).isEqualTo("TIN_DA_XOA");
+                // Xóa thắng: phien_ban_cap_nhat đã tăng nên ETag "0" của KDV đã cũ (412); tin không bị hồi sinh.
+                assertThat(ketQuaDuyet).isEqualTo("PHIEN_BAN_CU");
                 assertThat(ketQuaXoa).isEqualTo(THANH_CONG);
             }
 

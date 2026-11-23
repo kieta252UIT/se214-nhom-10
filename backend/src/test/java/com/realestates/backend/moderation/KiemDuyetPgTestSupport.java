@@ -36,7 +36,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 /**
  * Hỗ trợ dựng dữ liệu thử cho kiểm duyệt trên PostgreSQL thật. Mọi fixture đi qua luồng thật:
  * đăng tin = TinDangService.dangTin, sửa tin = QuanLyTinService.suaTin (tạm dừng gói), xóa = QuanLyTinService.xoaTin,
- * tin đã duyệt = KiemDuyetService.pheDuyet.
+ * tin đã duyệt = KiemDuyetService.quyetDinh (phe_duyet).
  */
 public final class KiemDuyetPgTestSupport {
 
@@ -134,8 +134,33 @@ public final class KiemDuyetPgTestSupport {
     /** Tin đã được phê duyệt bằng luồng phê duyệt thật (không sửa SQL). */
     public TinCho taoTinDaDuyet(TaiKhoanSession chu, TaiKhoanSession kdv) {
         TinCho tin = taoTinMoiChoDuyet(chu);
-        kiemDuyetService.pheDuyet(kdv.rawCookie(), tin.tinId(), tin.phienBanId(), "duyet-" + UUID.randomUUID(), etag(tin.tinId()));
+        pheDuyet(kdv, tin.tinId(), tin.phienBanId(), "duyet-" + UUID.randomUUID(), etag(tin.tinId()));
         return tin;
+    }
+
+    /** POST .../decision với quyetDinh = phe_duyet. */
+    public TinGhiKetQua pheDuyet(TaiKhoanSession kdv, UUID tinId, UUID phienBanDaXemId, String maYDinh, String ifMatch) {
+        return kiemDuyetService.quyetDinh(kdv.rawCookie(), tinId, maYDinh, ifMatch, thanPheDuyet(phienBanDaXemId));
+    }
+
+    /** POST .../decision với quyetDinh = tu_choi. */
+    public TinGhiKetQua tuChoi(TaiKhoanSession kdv, UUID tinId, UUID phienBanDaXemId, String maYDinh, String ifMatch, String lyDo) {
+        return kiemDuyetService.quyetDinh(kdv.rawCookie(), tinId, maYDinh, ifMatch, thanTuChoi(phienBanDaXemId, lyDo));
+    }
+
+    public static Map<String, Object> thanPheDuyet(UUID phienBanDaXemId) {
+        Map<String, Object> than = new LinkedHashMap<>();
+        than.put("phienBanDaXemId", phienBanDaXemId.toString());
+        than.put("quyetDinh", "phe_duyet");
+        return than;
+    }
+
+    public static Map<String, Object> thanTuChoi(UUID phienBanDaXemId, String lyDo) {
+        Map<String, Object> than = new LinkedHashMap<>();
+        than.put("phienBanDaXemId", phienBanDaXemId.toString());
+        than.put("quyetDinh", "tu_choi");
+        than.put("lyDo", lyDo);
+        return than;
     }
 
     /** Sửa tin qua luồng thật (đồng thời tạm dừng gói đang chạy); trả về phiên bản mới đang chờ duyệt. */

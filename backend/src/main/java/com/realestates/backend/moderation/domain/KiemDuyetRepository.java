@@ -1,8 +1,7 @@
 package com.realestates.backend.moderation.domain;
 
-import com.realestates.backend.moderation.dto.ChiTietPhienBanResponse;
-import com.realestates.backend.moderation.dto.KetQuaQuyetDinh;
-import com.realestates.backend.moderation.dto.MucHangCho;
+import com.realestates.backend.listing.dto.TinGhiKetQua;
+import com.realestates.backend.moderation.dto.TinQuanLy;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
@@ -11,18 +10,15 @@ import java.util.UUID;
 public interface KiemDuyetRepository {
 
     String LOAI_THAO_TAC_QUYET_DINH = "quyet_dinh";
-    String KET_QUA_DA_DUYET = "da_duyet";
-    String KET_QUA_BI_TU_CHOI = "bi_tu_choi";
 
-    record KetQuaYeuCauQuyetDinh(String duLieuBam, KetQuaQuyetDinh ketQua) {
+    record KetQuaYeuCauQuyetDinh(String duLieuBam, TinGhiKetQua ketQua) {
     }
 
     record DuLieuQuyetDinh(
             UUID tinId,
-            UUID phienBanId,
+            UUID phienBanDaXemId,
             UUID nguoiDuyetId,
-            /** {@link #KET_QUA_DA_DUYET} hoặc {@link #KET_QUA_BI_TU_CHOI}. */
-            String ketQua,
+            boolean pheDuyet,
             /** Chỉ dùng khi từ chối; đã trim. */
             String lyDo,
             long phienBanCapNhatDaXem,
@@ -34,12 +30,12 @@ public interface KiemDuyetRepository {
 
     enum LoaiLoiKiemDuyet {
         TIN_KHONG_TON_TAI,
-        PHIEN_BAN_KHONG_THUOC_TIN,
-        TIN_DA_XOA,
-        TIN_DA_BI_GO,
+        /** ETag hoặc phienBanDaXemId không còn đúng (412). */
         PHIEN_BAN_CU,
-        PHIEN_BAN_DA_CU,
-        DA_CO_QUYET_DINH,
+        /** Tin/phiên bản không còn chờ duyệt: đã xóa, bị gỡ, đã có quyết định (409). */
+        TRANG_THAI_KHONG_HOP_LE,
+        /** Phiên bản không đạt BR-03 khi kiểm lại trong transaction phê duyệt (409). */
+        KHONG_DAT_BR03,
         XUNG_DOT_MA_Y_DINH
     }
 
@@ -57,10 +53,13 @@ public interface KiemDuyetRepository {
         }
     }
 
-    /** Đọc tối đa {@code gioiHan} mục, bắt đầu sau {@code sau} (nếu có), cũ nhất trước. */
-    List<MucHangCho> docHangCho(ConTroHangCho sau, int gioiHan);
+    /** Tin cho_kiem_duyet, ngày đăng tăng rồi id tăng. */
+    List<TinQuanLy> docHangCho(int boQua, int gioiHan);
 
-    Optional<ChiTietPhienBanResponse> docChiTietPhienBan(UUID tinId, UUID phienBanId);
+    long demHangCho();
+
+    /** Tin kèm bản hiện tại, không lọc trạng thái (service quyết định 409). */
+    Optional<TinQuanLy> docTinCanDuyet(UUID tinId);
 
     Optional<KetQuaYeuCauQuyetDinh> timYeuCauQuyetDinh(UUID taiKhoanId, String maYDinh);
 
@@ -68,5 +67,5 @@ public interface KiemDuyetRepository {
      * Phải được gọi trong giao dịch ghi đã mở (khóa dòng tin, kiểm tra điều kiện, ghi phiên bản, tin, gói, nhật ký,
      * yêu cầu ghi) để mọi thay đổi cùng commit hoặc cùng rollback.
      */
-    KetQuaQuyetDinh quyetDinhTrongTransaction(DuLieuQuyetDinh duLieu);
+    TinGhiKetQua quyetDinhTrongTransaction(DuLieuQuyetDinh duLieu);
 }

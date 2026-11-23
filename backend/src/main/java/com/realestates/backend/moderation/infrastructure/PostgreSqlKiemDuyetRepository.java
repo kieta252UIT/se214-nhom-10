@@ -1,16 +1,22 @@
 package com.realestates.backend.moderation.infrastructure;
 
 import com.realestates.backend.listing.domain.ChuanHoaJson;
-import com.realestates.backend.moderation.domain.ConTroHangCho;
+import com.realestates.backend.listing.domain.KiemDuyetSoBoTin;
+import com.realestates.backend.listing.domain.KiemTraNoiDungTin;
+import com.realestates.backend.listing.dto.TinGhiKetQua;
 import com.realestates.backend.moderation.domain.KiemDuyetRepository;
-import com.realestates.backend.moderation.dto.AnhPhienBan;
-import com.realestates.backend.moderation.dto.ChiTietPhienBanResponse;
-import com.realestates.backend.moderation.dto.KetQuaQuyetDinh;
-import com.realestates.backend.moderation.dto.MucHangCho;
-import com.realestates.backend.moderation.dto.NoiDungPhienBan;
+import com.realestates.backend.moderation.dto.AnhHienThi;
+import com.realestates.backend.moderation.dto.GiaQuyDoiHienThi;
+import com.realestates.backend.moderation.dto.PhienBanNoiDung;
+import com.realestates.backend.moderation.dto.TinQuanLy;
+import java.math.BigDecimal;
+import java.sql.Array;
+import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -25,14 +31,11 @@ import org.springframework.stereotype.Repository;
 @ConditionalOnProperty(name = "app.repository.type", havingValue = "postgres")
 public class PostgreSqlKiemDuyetRepository implements KiemDuyetRepository {
 
+    private static final String TRANG_THAI_CHO = "cho_kiem_duyet";
     private static final String TRANG_THAI_DA_DUYET = "da_duyet";
     private static final String TRANG_THAI_BI_TU_CHOI = "bi_tu_choi";
-    private static final String TRANG_THAI_DA_XOA = "da_xoa";
-    private static final String TRANG_THAI_BI_GO = "bi_go_vi_pham";
-    private static final String KET_QUA_CHO = "cho_kiem_duyet";
 
     private record TinKhoaRow(
-            UUID chuId,
             String trangThai,
             UUID phienBanHienTaiId,
             UUID phienBanDaDuyetId,
@@ -40,86 +43,90 @@ public class PostgreSqlKiemDuyetRepository implements KiemDuyetRepository {
     ) {
     }
 
-    private record PhienBanQuyetDinhRow(UUID tinId, String ketQuaKiemDuyet) {
+    /** Một dòng tin + bản hiện tại, chưa có ảnh. */
+    private record TinBanRow(
+            UUID tinId,
+            String trangThai,
+            Timestamp ngayDang,
+            long phienBanCapNhat,
+            UUID phienBanHienTaiId,
+            UUID phienBanDaDuyetId,
+            String lyDoNgungHienThi,
+            UUID phienBanId,
+            int soPhienBan,
+            String tieuDe,
+            String moTa,
+            String loaiGiaoDich,
+            String loaiBds,
+            BigDecimal giaGoc,
+            String donViGia,
+            BigDecimal dienTichM2,
+            String diaChi,
+            String khuVuc,
+            BigDecimal viDo,
+            BigDecimal kinhDo,
+            String ketQuaSoBo,
+            String ketQuaKiemDuyet,
+            String lyDoTuChoi,
+            Timestamp taoLuc
+    ) {
+    }
+
+    private record AnhRow(UUID id, UUID phienBanId, int thuTu, String khoaAnhHienThi) {
     }
 
     private record GoiTamDungRow(UUID id) {
     }
 
-    private static final String SQL_HANG_CHO_DAU = """
-            SELECT t.id AS tin_id, p.id AS phien_ban_id, p.so_phien_ban,
-                   (t.phien_ban_da_duyet_id IS NOT NULL) AS la_ban_sua,
-                   p.tieu_de, p.loai_giao_dich, p.loai_bds, p.khu_vuc, p.gia_goc, p.don_vi_gia,
-                   p.dien_tich_m2, p.ket_qua_so_bo, p.tao_luc, t.chu_id
+    private static final String COT_TIN_BAN = """
+            SELECT t.id AS tin_id, t.trang_thai, t.ngay_dang, t.phien_ban_cap_nhat, t.phien_ban_hien_tai_id,
+                   t.phien_ban_da_duyet_id, t.ly_do_ngung_hien_thi,
+                   p.id AS phien_ban_id, p.so_phien_ban, p.tieu_de, p.mo_ta, p.loai_giao_dich, p.loai_bds,
+                   p.gia_goc, p.don_vi_gia, p.dien_tich_m2, p.dia_chi, p.khu_vuc, p.vi_do, p.kinh_do,
+                   p.ket_qua_so_bo, p.ket_qua_kiem_duyet, p.ly_do_tu_choi, p.tao_luc
             FROM se214.tin_bat_dong_san t
             JOIN se214.phien_ban_tin p ON p.id = t.phien_ban_hien_tai_id AND p.tin_id = t.id
-            WHERE p.ket_qua_kiem_duyet = 'cho_kiem_duyet'
-              AND t.trang_thai NOT IN ('da_xoa', 'bi_go_vi_pham')
-            ORDER BY p.tao_luc ASC, p.id ASC
-            LIMIT ?
             """;
 
-    private static final String SQL_HANG_CHO_TIEP = """
-            SELECT t.id AS tin_id, p.id AS phien_ban_id, p.so_phien_ban,
-                   (t.phien_ban_da_duyet_id IS NOT NULL) AS la_ban_sua,
-                   p.tieu_de, p.loai_giao_dich, p.loai_bds, p.khu_vuc, p.gia_goc, p.don_vi_gia,
-                   p.dien_tich_m2, p.ket_qua_so_bo, p.tao_luc, t.chu_id
+    private static final String DIEU_KIEN_HANG_CHO = """
+            WHERE t.trang_thai = 'cho_kiem_duyet'
+              AND p.ket_qua_kiem_duyet = 'cho_kiem_duyet'
+            """;
+
+    private static final String SQL_HANG_CHO = COT_TIN_BAN + DIEU_KIEN_HANG_CHO + """
+            ORDER BY t.ngay_dang ASC, t.id ASC
+            LIMIT ? OFFSET ?
+            """;
+
+    private static final String SQL_DEM_HANG_CHO = """
+            SELECT count(*)
             FROM se214.tin_bat_dong_san t
             JOIN se214.phien_ban_tin p ON p.id = t.phien_ban_hien_tai_id AND p.tin_id = t.id
-            WHERE p.ket_qua_kiem_duyet = 'cho_kiem_duyet'
-              AND t.trang_thai NOT IN ('da_xoa', 'bi_go_vi_pham')
-              AND (p.tao_luc, p.id) > (CAST(? AS timestamptz), CAST(? AS uuid))
-            ORDER BY p.tao_luc ASC, p.id ASC
-            LIMIT ?
+            """ + DIEU_KIEN_HANG_CHO;
+
+    private static final String SQL_DOC_TIN_BAN = COT_TIN_BAN + " WHERE t.id = ?";
+
+    private static final String SQL_DOC_ANH_CAC_PHIEN_BAN = """
+            SELECT id, phien_ban_tin_id, thu_tu, khoa_anh_hien_thi
+            FROM se214.anh_tin
+            WHERE phien_ban_tin_id = ANY(?)
+              AND trang_thai = 'da_gan'
+            ORDER BY phien_ban_tin_id, thu_tu ASC
             """;
 
-    private static final String SQL_DOC_TIN = """
-            SELECT chu_id, trang_thai, phien_ban_hien_tai_id, phien_ban_da_duyet_id, phien_ban_cap_nhat
+    private static final String SQL_KHOA_TIN = """
+            SELECT trang_thai, phien_ban_hien_tai_id, phien_ban_da_duyet_id, phien_ban_cap_nhat
             FROM se214.tin_bat_dong_san
             WHERE id = ?
-            """;
-
-    private static final String SQL_KHOA_TIN = SQL_DOC_TIN + " FOR UPDATE";
-
-    private static final String SQL_DOC_PHIEN_BAN = """
-            SELECT id, so_phien_ban, tieu_de, mo_ta, loai_giao_dich, loai_bds, gia_goc, don_vi_gia,
-                   dien_tich_m2, dia_chi, khu_vuc, vi_do, kinh_do, ket_qua_so_bo, ket_qua_kiem_duyet,
-                   nguoi_duyet_id, thoi_diem_quyet_dinh, ly_do_tu_choi, tao_luc
-            FROM se214.phien_ban_tin
-            WHERE id = ?
-              AND tin_id = ?
-            """;
-
-    private static final String SQL_DOC_ANH_PHIEN_BAN = """
-            SELECT id, thu_tu, khoa_anh_hien_thi
-            FROM se214.anh_tin
-            WHERE phien_ban_tin_id = ?
-              AND trang_thai = 'da_gan'
-            ORDER BY thu_tu ASC
+            FOR UPDATE
             """;
 
     private static final String SQL_TIM_YEU_CAU_QUYET_DINH = """
-            SELECT y.du_lieu_bam, y.tin_ket_qua_id, y.phien_ban_ket_qua_id, y.trang_thai_ket_qua,
-                   y.phien_ban_cap_nhat_ket_qua,
-                   p.ket_qua_kiem_duyet, p.nguoi_duyet_id, p.thoi_diem_quyet_dinh, p.ly_do_tu_choi
-            FROM se214.yeu_cau_ghi y
-            JOIN se214.phien_ban_tin p ON p.tin_id = y.tin_ket_qua_id AND p.id = y.phien_ban_ket_qua_id
-            WHERE y.tai_khoan_id = ?
-              AND y.loai_thao_tac = 'quyet_dinh'
-              AND y.ma_y_dinh = ?
-            """;
-
-    private static final String SQL_DOC_QUYET_DINH_PHIEN_BAN = """
-            SELECT ket_qua_kiem_duyet, nguoi_duyet_id, thoi_diem_quyet_dinh, ly_do_tu_choi
-            FROM se214.phien_ban_tin
-            WHERE id = ?
-              AND tin_id = ?
-            """;
-
-    private static final String SQL_DOC_PHIEN_BAN_DE_KIEM_TRA = """
-            SELECT tin_id, ket_qua_kiem_duyet
-            FROM se214.phien_ban_tin
-            WHERE id = ?
+            SELECT du_lieu_bam, tin_ket_qua_id, phien_ban_ket_qua_id, trang_thai_ket_qua, phien_ban_cap_nhat_ket_qua
+            FROM se214.yeu_cau_ghi
+            WHERE tai_khoan_id = ?
+              AND loai_thao_tac = 'quyet_dinh'
+              AND ma_y_dinh = ?
             """;
 
     private static final String SQL_GHI_QUYET_DINH_PHIEN_BAN = """
@@ -142,9 +149,10 @@ public class PostgreSqlKiemDuyetRepository implements KiemDuyetRepository {
             WHERE id = ?
             """;
 
-    private static final String SQL_TRANG_THAI_TIN_SAU_TU_CHOI = """
+    /** Từ chối (tin mới hoặc bản sửa): bi_tu_choi, giữ phien_ban_da_duyet_id để truy vết. */
+    private static final String SQL_TU_CHOI_TIN = """
             UPDATE se214.tin_bat_dong_san
-            SET trang_thai = ?,
+            SET trang_thai = 'bi_tu_choi',
                 phien_ban_cap_nhat = phien_ban_cap_nhat + 1
             WHERE id = ?
             """;
@@ -196,117 +204,96 @@ public class PostgreSqlKiemDuyetRepository implements KiemDuyetRepository {
     }
 
     @Override
-    public List<MucHangCho> docHangCho(ConTroHangCho sau, int gioiHan) {
-        if (sau == null) {
-            return jdbcTemplate.query(SQL_HANG_CHO_DAU, (rs, rowNum) -> mucHangCho(rs), gioiHan);
+    public List<TinQuanLy> docHangCho(int boQua, int gioiHan) {
+        List<TinBanRow> cacDong = jdbcTemplate.query(SQL_HANG_CHO, (rs, rowNum) -> tinBanRow(rs), gioiHan, boQua);
+        Map<UUID, List<AnhRow>> anhTheoBan = docAnh(cacDong.stream().map(TinBanRow::phienBanId).toList());
+        List<TinQuanLy> ketQua = new ArrayList<>(cacDong.size());
+        for (TinBanRow dong : cacDong) {
+            ketQua.add(tinQuanLy(dong, anhTheoBan.getOrDefault(dong.phienBanId(), List.of())));
         }
-        return jdbcTemplate.query(
-                SQL_HANG_CHO_TIEP,
-                (rs, rowNum) -> mucHangCho(rs),
-                Timestamp.from(sau.guiLuc()),
-                sau.phienBanId(),
-                gioiHan
-        );
-    }
-
-    private static MucHangCho mucHangCho(ResultSet rs) throws SQLException {
-        return new MucHangCho(
-                rs.getObject("tin_id", UUID.class),
-                rs.getObject("phien_ban_id", UUID.class),
-                rs.getInt("so_phien_ban"),
-                rs.getBoolean("la_ban_sua"),
-                rs.getString("tieu_de"),
-                rs.getString("loai_giao_dich"),
-                rs.getString("loai_bds"),
-                rs.getString("khu_vuc"),
-                rs.getBigDecimal("gia_goc"),
-                rs.getString("don_vi_gia"),
-                rs.getBigDecimal("dien_tich_m2"),
-                rs.getString("ket_qua_so_bo"),
-                rs.getTimestamp("tao_luc").toInstant(),
-                rs.getObject("chu_id", UUID.class)
-        );
+        return ketQua;
     }
 
     @Override
-    public Optional<ChiTietPhienBanResponse> docChiTietPhienBan(UUID tinId, UUID phienBanId) {
-        // Đọc tin trước để ETag (phien_ban_cap_nhat) không bao giờ mới hơn nội dung trả về.
-        Optional<TinKhoaRow> tinOpt = jdbcTemplate.query(SQL_DOC_TIN, (rs, rowNum) -> tinRow(rs), tinId)
-                .stream().findFirst();
-        if (tinOpt.isEmpty()) {
-            return Optional.empty();
-        }
-        TinKhoaRow tin = tinOpt.get();
-        Optional<NoiDungPhienBan> phienBan = docNoiDungPhienBan(tinId, phienBanId);
-        if (phienBan.isEmpty()) {
-            return Optional.empty();
-        }
-        NoiDungPhienBan banDaDuyet = null;
-        if (tin.phienBanDaDuyetId() != null && !tin.phienBanDaDuyetId().equals(phienBanId)) {
-            banDaDuyet = docNoiDungPhienBan(tinId, tin.phienBanDaDuyetId()).orElse(null);
-        }
-        return Optional.of(new ChiTietPhienBanResponse(
-                tinId,
-                tin.chuId(),
-                tin.trangThai(),
-                tin.phienBanCapNhat(),
-                tin.phienBanHienTaiId(),
-                tin.phienBanDaDuyetId(),
-                tin.phienBanDaDuyetId() != null,
-                phienBan.get(),
-                banDaDuyet
-        ));
+    public long demHangCho() {
+        Long soLuong = jdbcTemplate.queryForObject(SQL_DEM_HANG_CHO, Long.class);
+        return soLuong == null ? 0L : soLuong;
     }
 
-    private Optional<NoiDungPhienBan> docNoiDungPhienBan(UUID tinId, UUID phienBanId) {
-        Optional<NoiDungPhienBan> goc = jdbcTemplate.query(
-                SQL_DOC_PHIEN_BAN,
-                (rs, rowNum) -> {
-                    Timestamp thoiDiemQuyetDinh = rs.getTimestamp("thoi_diem_quyet_dinh");
-                    return new NoiDungPhienBan(
-                            rs.getObject("id", UUID.class),
-                            rs.getInt("so_phien_ban"),
-                            rs.getString("tieu_de"),
-                            rs.getString("mo_ta"),
-                            rs.getString("loai_giao_dich"),
-                            rs.getString("loai_bds"),
-                            rs.getBigDecimal("gia_goc"),
-                            rs.getString("don_vi_gia"),
-                            rs.getBigDecimal("dien_tich_m2"),
-                            rs.getString("dia_chi"),
-                            rs.getString("khu_vuc"),
-                            rs.getBigDecimal("vi_do"),
-                            rs.getBigDecimal("kinh_do"),
-                            rs.getString("ket_qua_so_bo"),
-                            rs.getString("ket_qua_kiem_duyet"),
-                            rs.getObject("nguoi_duyet_id", UUID.class),
-                            thoiDiemQuyetDinh == null ? null : thoiDiemQuyetDinh.toInstant(),
-                            rs.getString("ly_do_tu_choi"),
-                            rs.getTimestamp("tao_luc").toInstant(),
-                            List.of()
-                    );
-                },
-                phienBanId,
-                tinId
-        ).stream().findFirst();
-        if (goc.isEmpty()) {
+    @Override
+    public Optional<TinQuanLy> docTinCanDuyet(UUID tinId) {
+        Optional<TinBanRow> dong = docTinBan(tinId);
+        if (dong.isEmpty()) {
             return Optional.empty();
         }
-        List<AnhPhienBan> anh = jdbcTemplate.query(
-                SQL_DOC_ANH_PHIEN_BAN,
-                (rs, rowNum) -> new AnhPhienBan(
+        List<AnhRow> anh = docAnh(List.of(dong.get().phienBanId())).getOrDefault(dong.get().phienBanId(), List.of());
+        return Optional.of(tinQuanLy(dong.get(), anh));
+    }
+
+    private Optional<TinBanRow> docTinBan(UUID tinId) {
+        return jdbcTemplate.query(SQL_DOC_TIN_BAN, (rs, rowNum) -> tinBanRow(rs), tinId).stream().findFirst();
+    }
+
+    private Map<UUID, List<AnhRow>> docAnh(List<UUID> phienBanIds) {
+        Map<UUID, List<AnhRow>> ketQua = new HashMap<>();
+        if (phienBanIds.isEmpty()) {
+            return ketQua;
+        }
+        List<AnhRow> cacAnh = jdbcTemplate.query(
+                con -> {
+                    PreparedStatement ps = con.prepareStatement(SQL_DOC_ANH_CAC_PHIEN_BAN);
+                    Array mang = con.createArrayOf("uuid", phienBanIds.toArray());
+                    ps.setArray(1, mang);
+                    return ps;
+                },
+                (rs, rowNum) -> new AnhRow(
                         rs.getObject("id", UUID.class),
+                        rs.getObject("phien_ban_tin_id", UUID.class),
                         rs.getInt("thu_tu"),
                         rs.getString("khoa_anh_hien_thi")
-                ),
-                phienBanId
+                )
         );
-        NoiDungPhienBan g = goc.get();
-        return Optional.of(new NoiDungPhienBan(
-                g.id(), g.soPhienBan(), g.tieuDe(), g.moTa(), g.loaiGiaoDich(), g.loaiBds(), g.giaGoc(),
-                g.donViGia(), g.dienTichM2(), g.diaChi(), g.khuVuc(), g.viDo(), g.kinhDo(), g.ketQuaSoBo(),
-                g.ketQuaKiemDuyet(), g.nguoiDuyetId(), g.thoiDiemQuyetDinh(), g.lyDoTuChoi(), g.taoLuc(), anh
-        ));
+        for (AnhRow anh : cacAnh) {
+            ketQua.computeIfAbsent(anh.phienBanId(), k -> new ArrayList<>()).add(anh);
+        }
+        return ketQua;
+    }
+
+    private static TinQuanLy tinQuanLy(TinBanRow d, List<AnhRow> anh) {
+        PhienBanNoiDung noiDung = new PhienBanNoiDung(
+                d.phienBanId(),
+                d.soPhienBan(),
+                d.tieuDe(),
+                d.moTa(),
+                d.loaiGiaoDich(),
+                d.loaiBds(),
+                chuoiSo(d.giaGoc()),
+                d.donViGia(),
+                chuoiSo(d.dienTichM2()),
+                d.diaChi(),
+                d.khuVuc(),
+                chuoiSo(d.viDo()),
+                chuoiSo(d.kinhDo()),
+                anh.stream().map(a -> AnhHienThi.tu(a.id(), a.thuTu())).toList(),
+                d.taoLuc().toInstant(),
+                GiaQuyDoiHienThi.tinhCheDoTong(d.loaiGiaoDich(), d.giaGoc(), d.donViGia(), d.dienTichM2())
+        );
+        return new TinQuanLy(
+                d.tinId(),
+                d.trangThai(),
+                d.ngayDang().toInstant(),
+                d.phienBanCapNhat(),
+                d.phienBanHienTaiId(),
+                d.phienBanDaDuyetId(),
+                noiDung,
+                d.ketQuaSoBo(),
+                d.lyDoTuChoi(),
+                d.lyDoNgungHienThi()
+        );
+    }
+
+    private static String chuoiSo(BigDecimal so) {
+        return so == null ? null : so.toPlainString();
     }
 
     @Override
@@ -316,36 +303,31 @@ public class PostgreSqlKiemDuyetRepository implements KiemDuyetRepository {
         }
         return jdbcTemplate.query(
                 SQL_TIM_YEU_CAU_QUYET_DINH,
-                (rs, rowNum) -> {
-                    Timestamp thoiDiemQuyetDinh = rs.getTimestamp("thoi_diem_quyet_dinh");
-                    return new KetQuaYeuCauQuyetDinh(
-                            rs.getString("du_lieu_bam"),
-                            new KetQuaQuyetDinh(
-                                    rs.getObject("tin_ket_qua_id", UUID.class),
-                                    rs.getObject("phien_ban_ket_qua_id", UUID.class),
-                                    rs.getString("ket_qua_kiem_duyet"),
-                                    rs.getString("trang_thai_ket_qua"),
-                                    rs.getObject("nguoi_duyet_id", UUID.class),
-                                    thoiDiemQuyetDinh == null ? null : thoiDiemQuyetDinh.toInstant(),
-                                    rs.getString("ly_do_tu_choi"),
-                                    rs.getLong("phien_ban_cap_nhat_ket_qua")
-                            )
-                    );
-                },
+                (rs, rowNum) -> new KetQuaYeuCauQuyetDinh(
+                        rs.getString("du_lieu_bam"),
+                        new TinGhiKetQua(
+                                rs.getObject("tin_ket_qua_id", UUID.class),
+                                rs.getObject("phien_ban_ket_qua_id", UUID.class),
+                                rs.getString("trang_thai_ket_qua"),
+                                rs.getLong("phien_ban_cap_nhat_ket_qua")
+                        )
+                ),
                 taiKhoanId,
                 maYDinh
         ).stream().findFirst();
     }
 
     @Override
-    public KetQuaQuyetDinh quyetDinhTrongTransaction(DuLieuQuyetDinh duLieu) {
-        boolean pheDuyet = KET_QUA_DA_DUYET.equals(duLieu.ketQua());
-        if (!pheDuyet && !KET_QUA_BI_TU_CHOI.equals(duLieu.ketQua())) {
-            throw new IllegalArgumentException("Kết quả quyết định không hợp lệ: " + duLieu.ketQua());
-        }
+    public TinGhiKetQua quyetDinhTrongTransaction(DuLieuQuyetDinh duLieu) {
+        boolean pheDuyet = duLieu.pheDuyet();
 
         // 1. Khóa dòng tin trước mọi thứ khác (404 nếu không có).
-        TinKhoaRow tin = jdbcTemplate.query(SQL_KHOA_TIN, (rs, rowNum) -> tinRow(rs), duLieu.tinId())
+        TinKhoaRow tin = jdbcTemplate.query(SQL_KHOA_TIN, (rs, rowNum) -> new TinKhoaRow(
+                        rs.getString("trang_thai"),
+                        rs.getObject("phien_ban_hien_tai_id", UUID.class),
+                        rs.getObject("phien_ban_da_duyet_id", UUID.class),
+                        rs.getLong("phien_ban_cap_nhat")
+                ), duLieu.tinId())
                 .stream().findFirst()
                 .orElseThrow(() -> new LoiNghiepVuKiemDuyetException(
                         LoaiLoiKiemDuyet.TIN_KHONG_TON_TAI, "Không tìm thấy tin."));
@@ -362,87 +344,79 @@ public class PostgreSqlKiemDuyetRepository implements KiemDuyetRepository {
             return daLuu.get().ketQua();
         }
 
-        // 3. Kiểm tra điều kiện theo đúng thứ tự đặc tả.
-        if (TRANG_THAI_DA_XOA.equals(tin.trangThai())) {
-            throw new LoiNghiepVuKiemDuyetException(LoaiLoiKiemDuyet.TIN_DA_XOA, "Tin đã bị chủ tin xóa.");
-        }
-        if (TRANG_THAI_BI_GO.equals(tin.trangThai())) {
-            throw new LoiNghiepVuKiemDuyetException(LoaiLoiKiemDuyet.TIN_DA_BI_GO, "Tin đã bị gỡ do vi phạm.");
-        }
-        PhienBanQuyetDinhRow phienBan = jdbcTemplate.query(
-                SQL_DOC_PHIEN_BAN_DE_KIEM_TRA,
-                (rs, rowNum) -> new PhienBanQuyetDinhRow(
-                        rs.getObject("tin_id", UUID.class),
-                        rs.getString("ket_qua_kiem_duyet")
-                ),
-                duLieu.phienBanId()
-        ).stream().findFirst().orElse(null);
-        if (phienBan == null || !duLieu.tinId().equals(phienBan.tinId())) {
-            throw new LoiNghiepVuKiemDuyetException(
-                    LoaiLoiKiemDuyet.PHIEN_BAN_KHONG_THUOC_TIN, "Không tìm thấy phiên bản của tin."
-            );
-        }
-        if (tin.phienBanCapNhat() != duLieu.phienBanCapNhatDaXem()) {
+        // 3. Tiền điều kiện phiên bản: If-Match và phienBanDaXemId (412 PHIEN_BAN_CU).
+        if (tin.phienBanCapNhat() != duLieu.phienBanCapNhatDaXem()
+                || !duLieu.phienBanDaXemId().equals(tin.phienBanHienTaiId())) {
             throw new LoiNghiepVuKiemDuyetException(
                     LoaiLoiKiemDuyet.PHIEN_BAN_CU, "Tin đã thay đổi. Hãy tải lại trước khi thao tác."
             );
         }
-        if (!duLieu.phienBanId().equals(tin.phienBanHienTaiId())) {
+
+        // 4. Trạng thái: chỉ tin và bản hiện tại còn cho_kiem_duyet (409 TRANG_THAI_KHONG_HOP_LE).
+        if (!TRANG_THAI_CHO.equals(tin.trangThai())) {
             throw new LoiNghiepVuKiemDuyetException(
-                    LoaiLoiKiemDuyet.PHIEN_BAN_DA_CU, "Chủ tin đã gửi phiên bản mới hơn; phiên bản này không còn chờ duyệt."
+                    LoaiLoiKiemDuyet.TRANG_THAI_KHONG_HOP_LE, "Tin không còn ở trạng thái chờ kiểm duyệt."
             );
         }
-        if (!KET_QUA_CHO.equals(phienBan.ketQuaKiemDuyet())) {
+        TinBanRow ban = docTinBan(duLieu.tinId()).orElseThrow(() -> new LoiNghiepVuKiemDuyetException(
+                LoaiLoiKiemDuyet.TIN_KHONG_TON_TAI, "Không tìm thấy tin."));
+        if (!TRANG_THAI_CHO.equals(ban.ketQuaKiemDuyet())) {
             throw new LoiNghiepVuKiemDuyetException(
-                    LoaiLoiKiemDuyet.DA_CO_QUYET_DINH, "Phiên bản này đã có quyết định kiểm duyệt."
+                    LoaiLoiKiemDuyet.TRANG_THAI_KHONG_HOP_LE, "Phiên bản này đã có quyết định kiểm duyệt."
             );
         }
 
-        // 4. Ghi phiên bản.
+        // 5. Phê duyệt: kiểm lại BR-03 trên đúng nội dung và ảnh da_gan của bản này.
+        if (pheDuyet && !datBr03(ban)) {
+            throw new LoiNghiepVuKiemDuyetException(
+                    LoaiLoiKiemDuyet.KHONG_DAT_BR03,
+                    "Phiên bản chưa đủ điều kiện hiển thị (BR-03); không thể phê duyệt."
+            );
+        }
+
+        // 6. Ghi phiên bản.
         Timestamp thoiDiemSql = Timestamp.from(duLieu.thoiDiem());
         int daGhi = jdbcTemplate.update(
                 SQL_GHI_QUYET_DINH_PHIEN_BAN,
-                duLieu.ketQua(),
+                pheDuyet ? TRANG_THAI_DA_DUYET : TRANG_THAI_BI_TU_CHOI,
                 duLieu.nguoiDuyetId(),
                 thoiDiemSql,
                 pheDuyet ? null : duLieu.lyDo(),
-                duLieu.phienBanId(),
+                duLieu.phienBanDaXemId(),
                 duLieu.tinId()
         );
         if (daGhi != 1) {
             throw new LoiNghiepVuKiemDuyetException(
-                    LoaiLoiKiemDuyet.DA_CO_QUYET_DINH, "Phiên bản này đã có quyết định kiểm duyệt."
+                    LoaiLoiKiemDuyet.TRANG_THAI_KHONG_HOP_LE, "Phiên bản này đã có quyết định kiểm duyệt."
             );
         }
 
-        // 5. Ghi tin.
-        boolean laBanSua = tin.phienBanDaDuyetId() != null;
+        // 7. Ghi tin. Q04–Q05: từ chối (kể cả bản sửa) => bi_tu_choi, giữ phien_ban_da_duyet_id để truy vết.
         String trangThaiMoi;
         UUID phienBanDaDuyetMoi;
         if (pheDuyet) {
             trangThaiMoi = TRANG_THAI_DA_DUYET;
-            phienBanDaDuyetMoi = duLieu.phienBanId();
-            jdbcTemplate.update(SQL_PHE_DUYET_TIN, duLieu.phienBanId(), duLieu.tinId());
+            phienBanDaDuyetMoi = duLieu.phienBanDaXemId();
+            jdbcTemplate.update(SQL_PHE_DUYET_TIN, duLieu.phienBanDaXemId(), duLieu.tinId());
         } else {
-            // Từ chối bản sửa: tin quay về bản đã duyệt cũ; từ chối tin mới: bi_tu_choi.
-            trangThaiMoi = laBanSua ? TRANG_THAI_DA_DUYET : TRANG_THAI_BI_TU_CHOI;
+            trangThaiMoi = TRANG_THAI_BI_TU_CHOI;
             phienBanDaDuyetMoi = tin.phienBanDaDuyetId();
-            jdbcTemplate.update(SQL_TRANG_THAI_TIN_SAU_TU_CHOI, trangThaiMoi, duLieu.tinId());
+            jdbcTemplate.update(SQL_TU_CHOI_TIN, duLieu.tinId());
         }
         long phienBanCapNhatMoi = tin.phienBanCapNhat() + 1;
 
-        // 6. Gói đẩy tin: chạy tiếp khi tin hiển thị công khai trở lại.
-        if (pheDuyet || laBanSua) {
+        // 8. Gói đẩy tin: chỉ chạy tiếp khi phê duyệt; từ chối giữ nguyên tam_dung_cho_duyet.
+        if (pheDuyet) {
             chayTiepGoiTamDung(duLieu.tinId(), duLieu.nguoiDuyetId(), thoiDiemSql);
         }
 
-        // 7. Nhật ký kiểm toán và yêu cầu ghi.
+        // 9. Nhật ký kiểm toán và yêu cầu ghi (snapshot kết quả cho replay).
         jdbcTemplate.update(
                 SQL_INSERT_AUDIT,
                 UUID.randomUUID(),
                 duLieu.nguoiDuyetId(),
                 duLieu.tinId(),
-                duLieu.phienBanId(),
+                duLieu.phienBanDaXemId(),
                 pheDuyet ? "phe_duyet" : "tu_choi",
                 duLieuAudit(tin, trangThaiMoi, phienBanDaDuyetMoi, phienBanCapNhatMoi),
                 pheDuyet ? null : duLieu.lyDo(),
@@ -455,31 +429,39 @@ public class PostgreSqlKiemDuyetRepository implements KiemDuyetRepository {
                 duLieu.maYDinh(),
                 duLieu.duLieuBam(),
                 duLieu.tinId(),
-                duLieu.phienBanId(),
+                duLieu.phienBanDaXemId(),
                 trangThaiMoi,
                 phienBanCapNhatMoi,
                 thoiDiemSql
         );
+        return new TinGhiKetQua(duLieu.tinId(), duLieu.phienBanDaXemId(), trangThaiMoi, phienBanCapNhatMoi);
+    }
 
-        // 8. Dựng kết quả từ dữ liệu đã lưu để lần đầu và replay trả cùng một thân phản hồi.
-        return jdbcTemplate.query(
-                SQL_DOC_QUYET_DINH_PHIEN_BAN,
-                (rs, rowNum) -> {
-                    Timestamp thoiDiemQuyetDinh = rs.getTimestamp("thoi_diem_quyet_dinh");
-                    return new KetQuaQuyetDinh(
-                            duLieu.tinId(),
-                            duLieu.phienBanId(),
-                            rs.getString("ket_qua_kiem_duyet"),
-                            trangThaiMoi,
-                            rs.getObject("nguoi_duyet_id", UUID.class),
-                            thoiDiemQuyetDinh == null ? null : thoiDiemQuyetDinh.toInstant(),
-                            rs.getString("ly_do_tu_choi"),
-                            phienBanCapNhatMoi
-                    );
-                },
-                duLieu.phienBanId(),
-                duLieu.tinId()
-        ).stream().findFirst().orElseThrow(() -> new IllegalStateException("Không đọc lại được phiên bản vừa quyết định."));
+    /** BR-03: nội dung hợp lệ theo cùng quy tắc đăng/sửa và có 1–12 ảnh da_gan đã có bản hiển thị. */
+    private boolean datBr03(TinBanRow ban) {
+        Map<String, Object> noiDung = new LinkedHashMap<>();
+        noiDung.put(KiemTraNoiDungTin.TRUONG_TIEU_DE, ban.tieuDe());
+        noiDung.put(KiemTraNoiDungTin.TRUONG_MO_TA, ban.moTa());
+        noiDung.put(KiemTraNoiDungTin.TRUONG_LOAI_GIAO_DICH, ban.loaiGiaoDich());
+        noiDung.put(KiemTraNoiDungTin.TRUONG_LOAI_BDS, ban.loaiBds());
+        noiDung.put(KiemTraNoiDungTin.TRUONG_GIA_GOC, chuoiSo(ban.giaGoc()));
+        noiDung.put(KiemTraNoiDungTin.TRUONG_DON_VI_GIA, ban.donViGia());
+        noiDung.put(KiemTraNoiDungTin.TRUONG_DIEN_TICH, chuoiSo(ban.dienTichM2()));
+        noiDung.put(KiemTraNoiDungTin.TRUONG_DIA_CHI, ban.diaChi());
+        noiDung.put(KiemTraNoiDungTin.TRUONG_KHU_VUC, ban.khuVuc());
+        noiDung.put(KiemTraNoiDungTin.TRUONG_VI_DO, chuoiSo(ban.viDo()));
+        noiDung.put(KiemTraNoiDungTin.TRUONG_KINH_DO, chuoiSo(ban.kinhDo()));
+        KiemTraNoiDungTin.KetQua ketQuaNoiDung = KiemTraNoiDungTin.kiemTra(noiDung);
+        if (!ketQuaNoiDung.hopLe()) {
+            return false;
+        }
+        List<AnhRow> anh = docAnh(List.of(ban.phienBanId())).getOrDefault(ban.phienBanId(), List.of());
+        boolean anhDuBanHienThi = anh.stream().allMatch(a -> a.khoaAnhHienThi() != null && !a.khoaAnhHienThi().isBlank());
+        if (!anhDuBanHienThi) {
+            return false;
+        }
+        List<UUID> anhIds = anh.stream().map(AnhRow::id).toList();
+        return KiemDuyetSoBoTin.danhGia(ketQuaNoiDung.noiDung(), anhIds).dat();
     }
 
     private void chayTiepGoiTamDung(UUID tinId, UUID nguoiThucHienId, Timestamp thoiDiemSql) {
@@ -524,13 +506,32 @@ public class PostgreSqlKiemDuyetRepository implements KiemDuyetRepository {
         return ChuanHoaJson.toJsonString(audit);
     }
 
-    private static TinKhoaRow tinRow(ResultSet rs) throws SQLException {
-        return new TinKhoaRow(
-                rs.getObject("chu_id", UUID.class),
+    private static TinBanRow tinBanRow(ResultSet rs) throws SQLException {
+        return new TinBanRow(
+                rs.getObject("tin_id", UUID.class),
                 rs.getString("trang_thai"),
+                rs.getTimestamp("ngay_dang"),
+                rs.getLong("phien_ban_cap_nhat"),
                 rs.getObject("phien_ban_hien_tai_id", UUID.class),
                 rs.getObject("phien_ban_da_duyet_id", UUID.class),
-                rs.getLong("phien_ban_cap_nhat")
+                rs.getString("ly_do_ngung_hien_thi"),
+                rs.getObject("phien_ban_id", UUID.class),
+                rs.getInt("so_phien_ban"),
+                rs.getString("tieu_de"),
+                rs.getString("mo_ta"),
+                rs.getString("loai_giao_dich"),
+                rs.getString("loai_bds"),
+                rs.getBigDecimal("gia_goc"),
+                rs.getString("don_vi_gia"),
+                rs.getBigDecimal("dien_tich_m2"),
+                rs.getString("dia_chi"),
+                rs.getString("khu_vuc"),
+                rs.getBigDecimal("vi_do"),
+                rs.getBigDecimal("kinh_do"),
+                rs.getString("ket_qua_so_bo"),
+                rs.getString("ket_qua_kiem_duyet"),
+                rs.getString("ly_do_tu_choi"),
+                rs.getTimestamp("tao_luc")
         );
     }
 }

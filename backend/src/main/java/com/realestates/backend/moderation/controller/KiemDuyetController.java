@@ -3,10 +3,10 @@ package com.realestates.backend.moderation.controller;
 import com.realestates.backend.auth.controller.AuthCsrfAndMeController;
 import com.realestates.backend.config.AuthSessionCookieConfig;
 import com.realestates.backend.listing.application.TinDangService;
+import com.realestates.backend.listing.dto.TinGhiKetQua;
 import com.realestates.backend.moderation.application.KiemDuyetService;
-import com.realestates.backend.moderation.dto.ChiTietPhienBanResponse;
-import com.realestates.backend.moderation.dto.HangChoResponse;
-import com.realestates.backend.moderation.dto.KetQuaQuyetDinh;
+import com.realestates.backend.moderation.dto.TinQuanLy;
+import com.realestates.backend.moderation.dto.TrangTinQuanLy;
 import jakarta.servlet.http.HttpServletRequest;
 import java.util.Map;
 import java.util.Objects;
@@ -24,8 +24,9 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+/** Ba operation kiểm duyệt của openapi-sprint-1.yaml: layDanhSachChoDuyet, layBanCanDuyet, quyetDinhKiemDuyet. */
 @RestController
-@RequestMapping("/api/moderation")
+@RequestMapping("/api/moderation/listings")
 public class KiemDuyetController {
 
     private final KiemDuyetService kiemDuyetService;
@@ -36,26 +37,25 @@ public class KiemDuyetController {
         this.authSessionCookieConfig = Objects.requireNonNull(authSessionCookieConfig, "authSessionCookieConfig không được null");
     }
 
-    @GetMapping(value = "/queue", produces = MediaType.APPLICATION_JSON_VALUE)
-    public ResponseEntity<HangChoResponse> layHangCho(
+    @GetMapping(produces = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseEntity<TrangTinQuanLy> layDanhSachChoDuyet(
             HttpServletRequest request,
-            @RequestParam(value = "cursor", required = false) String cursor,
-            @RequestParam(value = "limit", required = false) String limit
+            @RequestParam(value = KiemDuyetService.THAM_SO_TRANG, required = false) String trang,
+            @RequestParam(value = KiemDuyetService.THAM_SO_KICH_THUOC, required = false) String kichThuoc
     ) {
-        HangChoResponse ketQua = kiemDuyetService.layHangCho(docCookiePhien(request), cursor, limit);
+        TrangTinQuanLy ketQua = kiemDuyetService.layDanhSachChoDuyet(docCookiePhien(request), trang, kichThuoc);
         return ResponseEntity.ok()
                 .cacheControl(CacheControl.noStore())
                 .header(HttpHeaders.VARY, HttpHeaders.COOKIE)
                 .body(ketQua);
     }
 
-    @GetMapping(value = "/listings/{listingId}/versions/{versionId}", produces = MediaType.APPLICATION_JSON_VALUE)
-    public ResponseEntity<ChiTietPhienBanResponse> layChiTietPhienBan(
+    @GetMapping(value = "/{listingId}", produces = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseEntity<TinQuanLy> layBanCanDuyet(
             HttpServletRequest request,
-            @PathVariable("listingId") UUID tinId,
-            @PathVariable("versionId") UUID phienBanId
+            @PathVariable("listingId") UUID tinId
     ) {
-        ChiTietPhienBanResponse ketQua = kiemDuyetService.layChiTietPhienBan(docCookiePhien(request), tinId, phienBanId);
+        TinQuanLy ketQua = kiemDuyetService.layBanCanDuyet(docCookiePhien(request), tinId);
         return ResponseEntity.ok()
                 .cacheControl(CacheControl.noStore())
                 .header(HttpHeaders.VARY, HttpHeaders.COOKIE)
@@ -63,44 +63,23 @@ public class KiemDuyetController {
                 .body(ketQua);
     }
 
-    @PostMapping(value = "/listings/{listingId}/versions/{versionId}/approve", produces = MediaType.APPLICATION_JSON_VALUE)
-    public ResponseEntity<KetQuaQuyetDinh> pheDuyet(
+    @PostMapping(value = "/{listingId}/decision", produces = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseEntity<TinGhiKetQua> quyetDinhKiemDuyet(
             HttpServletRequest request,
             @PathVariable("listingId") UUID tinId,
-            @PathVariable("versionId") UUID phienBanId,
-            @RequestHeader(value = TinDangService.HEADER_IDEMPOTENCY_KEY, required = false) String idempotencyKey,
-            @RequestHeader(value = KiemDuyetService.HEADER_IF_MATCH, required = false) String ifMatch
-    ) {
-        KetQuaQuyetDinh ketQua = kiemDuyetService.pheDuyet(
-                docCookiePhien(request), tinId, phienBanId, idempotencyKey, ifMatch
-        );
-        return phanHoiQuyetDinh(ketQua);
-    }
-
-    @PostMapping(value = "/listings/{listingId}/versions/{versionId}/reject", produces = MediaType.APPLICATION_JSON_VALUE)
-    public ResponseEntity<KetQuaQuyetDinh> tuChoi(
-            HttpServletRequest request,
-            @PathVariable("listingId") UUID tinId,
-            @PathVariable("versionId") UUID phienBanId,
             @RequestHeader(value = TinDangService.HEADER_IDEMPOTENCY_KEY, required = false) String idempotencyKey,
             @RequestHeader(value = KiemDuyetService.HEADER_IF_MATCH, required = false) String ifMatch,
             @RequestBody(required = false) Map<String, Object> body
     ) {
-        KetQuaQuyetDinh ketQua = kiemDuyetService.tuChoi(
-                docCookiePhien(request), tinId, phienBanId, idempotencyKey, ifMatch, body
-        );
-        return phanHoiQuyetDinh(ketQua);
-    }
-
-    private String docCookiePhien(HttpServletRequest request) {
-        return AuthCsrfAndMeController.docGiaTriCookie(request, authSessionCookieConfig.getSessionCookieName());
-    }
-
-    private static ResponseEntity<KetQuaQuyetDinh> phanHoiQuyetDinh(KetQuaQuyetDinh ketQua) {
+        TinGhiKetQua ketQua = kiemDuyetService.quyetDinh(docCookiePhien(request), tinId, idempotencyKey, ifMatch, body);
         return ResponseEntity.ok()
                 .cacheControl(CacheControl.noStore())
                 .header(HttpHeaders.VARY, HttpHeaders.COOKIE)
                 .header(HttpHeaders.ETAG, "\"" + ketQua.phienBanCapNhat() + "\"")
                 .body(ketQua);
+    }
+
+    private String docCookiePhien(HttpServletRequest request) {
+        return AuthCsrfAndMeController.docGiaTriCookie(request, authSessionCookieConfig.getSessionCookieName());
     }
 }

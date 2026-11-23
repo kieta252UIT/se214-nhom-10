@@ -13,25 +13,25 @@ import com.realestates.backend.auth.exception.InvalidCsrfException;
 import com.realestates.backend.auth.exception.UnauthenticatedSessionException;
 import com.realestates.backend.listing.application.TinDangService;
 import com.realestates.backend.listing.domain.ChuanHoaJson;
+import com.realestates.backend.listing.dto.TinGhiKetQua;
 import com.realestates.backend.listing.exception.ListingConflictException;
 import com.realestates.backend.listing.exception.ListingNotFoundException;
 import com.realestates.backend.listing.exception.ListingPreconditionException;
-import com.realestates.backend.moderation.domain.ConTroHangCho;
 import com.realestates.backend.moderation.domain.KiemDuyetRepository;
 import com.realestates.backend.moderation.domain.KiemDuyetRepository.DuLieuQuyetDinh;
 import com.realestates.backend.moderation.domain.KiemDuyetRepository.KetQuaYeuCauQuyetDinh;
 import com.realestates.backend.moderation.domain.KiemDuyetRepository.LoiNghiepVuKiemDuyetException;
-import com.realestates.backend.moderation.dto.ChiTietPhienBanResponse;
-import com.realestates.backend.moderation.dto.HangChoResponse;
-import com.realestates.backend.moderation.dto.KetQuaQuyetDinh;
-import com.realestates.backend.moderation.dto.MucHangCho;
-import com.realestates.backend.moderation.exception.KiemDuyetMaLoi;
+import com.realestates.backend.moderation.dto.TinQuanLy;
+import com.realestates.backend.moderation.dto.TrangTinQuanLy;
 import java.time.Clock;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.regex.Pattern;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -42,16 +42,31 @@ import org.springframework.stereotype.Service;
 public class KiemDuyetService {
 
     public static final String HEADER_IF_MATCH = "If-Match";
-    public static final int GIOI_HAN_MAC_DINH = 20;
-    public static final int GIOI_HAN_TOI_DA = 50;
+    public static final String THAM_SO_TRANG = "trang";
+    public static final String THAM_SO_KICH_THUOC = "kichThuoc";
+    public static final int TRANG_TOI_DA = 100_000;
+    public static final int KICH_THUOC_MAC_DINH = 20;
+    public static final int KICH_THUOC_TOI_DA = 50;
     public static final int DO_DAI_LY_DO_TOI_DA = 1000;
-    public static final String TRUONG_LY_DO = "lyDo";
 
+    public static final String TRUONG_PHIEN_BAN_DA_XEM = "phienBanDaXemId";
+    public static final String TRUONG_QUYET_DINH = "quyetDinh";
+    public static final String TRUONG_LY_DO = "lyDo";
+    public static final String QUYET_DINH_PHE_DUYET = "phe_duyet";
+    public static final String QUYET_DINH_TU_CHOI = "tu_choi";
+
+    private static final Set<String> CAC_TRUONG_QUYET_DINH = Set.of(
+            TRUONG_PHIEN_BAN_DA_XEM, TRUONG_QUYET_DINH, TRUONG_LY_DO
+    );
+    private static final String TRANG_THAI_CHO = "cho_kiem_duyet";
     private static final String MA_LOI_DU_LIEU_KHONG_HOP_LE = TinDangService.MA_LOI_DU_LIEU_KHONG_HOP_LE;
     private static final String THONG_DIEP_KHONG_HOP_LE = "Dữ liệu gửi lên không hợp lệ.";
     private static final String THONG_DIEP_GIAN_DOAN = "Hệ thống kiểm duyệt đang tạm gián đoạn. Vui lòng thử lại sau.";
     private static final Pattern ETAG_MANH = Pattern.compile("^\"(0|[1-9][0-9]*)\"$");
-    private static final Pattern SO_NGUYEN_DUONG = Pattern.compile("^[0-9]{1,9}$");
+    private static final Pattern SO_NGUYEN_KHONG_AM = Pattern.compile("^[0-9]{1,9}$");
+    private static final Pattern UUID_CHUAN = Pattern.compile(
+            "[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
+    );
 
     private final CurrentPermissionAndCsrfService permissionAndCsrfService;
     private final KiemDuyetRepository kiemDuyetRepository;
@@ -75,124 +90,71 @@ public class KiemDuyetService {
         this.clock = Objects.requireNonNull(clock, "clock không được null");
     }
 
-    public HangChoResponse layHangCho(String rawSessionCookie, String rawCursor, String rawLimit) {
-        permissionAndCsrfService.kiemTraQuyenThaoTac(
-                rawSessionCookie,
-                ThaoTacNghiepVu.XEM_HANG_CHO_VA_DUYET_TIN,
-                null,
-                null
-        );
-        int gioiHan = docGioiHan(rawLimit);
-        ConTroHangCho conTro = docConTro(rawCursor);
-
-        List<MucHangCho> docDuoc = docHangChoAnToan(conTro, gioiHan + 1);
-        if (docDuoc.size() <= gioiHan) {
-            return new HangChoResponse(List.copyOf(docDuoc), null);
+    /** GET /api/moderation/listings: tin cho_kiem_duyet, ngày đăng tăng rồi id tăng. */
+    public TrangTinQuanLy layDanhSachChoDuyet(String rawSessionCookie, String rawTrang, String rawKichThuoc) {
+        kiemTraQuyenKdv(rawSessionCookie);
+        List<FieldErrorItem> loi = new ArrayList<>();
+        int trang = docSoTrongKhoang(rawTrang, THAM_SO_TRANG, 0, 0, TRANG_TOI_DA, loi);
+        int kichThuoc = docSoTrongKhoang(rawKichThuoc, THAM_SO_KICH_THUOC, KICH_THUOC_MAC_DINH, 1, KICH_THUOC_TOI_DA, loi);
+        if (!loi.isEmpty()) {
+            throw new AuthValidationException(MA_LOI_DU_LIEU_KHONG_HOP_LE, THONG_DIEP_KHONG_HOP_LE, loi);
         }
-        List<MucHangCho> trang = List.copyOf(docDuoc.subList(0, gioiHan));
-        MucHangCho cuoi = trang.get(trang.size() - 1);
-        return new HangChoResponse(trang, new ConTroHangCho(cuoi.guiLuc(), cuoi.phienBanId()).maHoa());
-    }
-
-    public ChiTietPhienBanResponse layChiTietPhienBan(String rawSessionCookie, UUID tinId, UUID phienBanId) {
-        permissionAndCsrfService.kiemTraQuyenThaoTac(
-                rawSessionCookie,
-                ThaoTacNghiepVu.XEM_HANG_CHO_VA_DUYET_TIN,
-                null,
-                null
-        );
         try {
-            return kiemDuyetRepository.docChiTietPhienBan(tinId, phienBanId)
-                    .orElseThrow(ListingNotFoundException::new);
-        } catch (ListingNotFoundException ex) {
-            throw ex;
+            long tongSo = kiemDuyetRepository.demHangCho();
+            long boQua = (long) trang * kichThuoc;
+            List<TinQuanLy> noiDung = boQua >= tongSo
+                    ? List.of()
+                    : kiemDuyetRepository.docHangCho((int) boQua, kichThuoc);
+            return new TrangTinQuanLy(List.copyOf(noiDung), trang, kichThuoc, tongSo);
         } catch (RuntimeException ex) {
             throw new AuthProviderUnavailableException(THONG_DIEP_GIAN_DOAN, ex);
         }
     }
 
-    public KetQuaQuyetDinh pheDuyet(
-            String rawSessionCookie,
-            UUID tinId,
-            UUID phienBanId,
-            String rawIdempotencyKey,
-            String rawIfMatch
-    ) {
-        PrincipalPhienHienTai nguoiDuyet = permissionAndCsrfService.kiemTraQuyenThaoTac(
-                rawSessionCookie,
-                ThaoTacNghiepVu.XEM_HANG_CHO_VA_DUYET_TIN,
-                null,
-                null
-        );
-        String maYDinh = chuanHoaVaKiemTraMaYDinh(rawIdempotencyKey);
-        long phienBanCapNhatDaXem = docIfMatch(rawIfMatch);
-
-        Map<String, Object> yeuCauDeBam = new LinkedHashMap<>();
-        yeuCauDeBam.put("ifMatch", rawIfMatch.trim());
-        String duLieuBam = ChuanHoaJson.bamYeuCau("POST", duongDan(tinId, phienBanId, "approve"), yeuCauDeBam);
-
-        return thucThiQuyetDinh(
-                rawSessionCookie,
-                nguoiDuyet.getTaiKhoanId(),
-                maYDinh,
-                duLieuBam,
-                tinId,
-                phienBanId,
-                KiemDuyetRepository.KET_QUA_DA_DUYET,
-                null,
-                phienBanCapNhatDaXem
-        );
+    /** GET /api/moderation/listings/{listingId}: đúng bản hiện tại cần duyệt. */
+    public TinQuanLy layBanCanDuyet(String rawSessionCookie, UUID tinId) {
+        kiemTraQuyenKdv(rawSessionCookie);
+        Optional<TinQuanLy> tin;
+        try {
+            tin = kiemDuyetRepository.docTinCanDuyet(tinId);
+        } catch (RuntimeException ex) {
+            throw new AuthProviderUnavailableException(THONG_DIEP_GIAN_DOAN, ex);
+        }
+        TinQuanLy ketQua = tin.orElseThrow(ListingNotFoundException::new);
+        if (!TRANG_THAI_CHO.equals(ketQua.trangThai())) {
+            throw new ListingConflictException(
+                    ListingConflictException.MA_LOI_TRANG_THAI_KHONG_HOP_LE,
+                    "Tin không còn ở trạng thái chờ kiểm duyệt."
+            );
+        }
+        return ketQua;
     }
 
-    public KetQuaQuyetDinh tuChoi(
+    /** POST /api/moderation/listings/{listingId}/decision. */
+    public TinGhiKetQua quyetDinh(
             String rawSessionCookie,
             UUID tinId,
-            UUID phienBanId,
             String rawIdempotencyKey,
             String rawIfMatch,
             Map<String, Object> rawBody
     ) {
-        PrincipalPhienHienTai nguoiDuyet = permissionAndCsrfService.kiemTraQuyenThaoTac(
-                rawSessionCookie,
-                ThaoTacNghiepVu.XEM_HANG_CHO_VA_DUYET_TIN,
-                null,
-                null
-        );
+        PrincipalPhienHienTai nguoiDuyet = kiemTraQuyenKdv(rawSessionCookie);
         String maYDinh = chuanHoaVaKiemTraMaYDinh(rawIdempotencyKey);
         long phienBanCapNhatDaXem = docIfMatch(rawIfMatch);
-        String lyDo = docLyDo(rawBody);
+        YeuCauQuyetDinh yeuCau = docYeuCauQuyetDinh(rawBody);
 
         Map<String, Object> thanBam = new LinkedHashMap<>();
-        thanBam.put(TRUONG_LY_DO, lyDo);
+        thanBam.put(TRUONG_PHIEN_BAN_DA_XEM, yeuCau.phienBanDaXemId().toString());
+        thanBam.put(TRUONG_QUYET_DINH, yeuCau.quyetDinh());
+        if (yeuCau.lyDo() != null) {
+            thanBam.put(TRUONG_LY_DO, yeuCau.lyDo());
+        }
         Map<String, Object> yeuCauDeBam = new LinkedHashMap<>();
         yeuCauDeBam.put("ifMatch", rawIfMatch.trim());
         yeuCauDeBam.put("body", thanBam);
-        String duLieuBam = ChuanHoaJson.bamYeuCau("POST", duongDan(tinId, phienBanId, "reject"), yeuCauDeBam);
+        String duLieuBam = ChuanHoaJson.bamYeuCau("POST", duongDanQuyetDinh(tinId), yeuCauDeBam);
 
-        return thucThiQuyetDinh(
-                rawSessionCookie,
-                nguoiDuyet.getTaiKhoanId(),
-                maYDinh,
-                duLieuBam,
-                tinId,
-                phienBanId,
-                KiemDuyetRepository.KET_QUA_BI_TU_CHOI,
-                lyDo,
-                phienBanCapNhatDaXem
-        );
-    }
-
-    private KetQuaQuyetDinh thucThiQuyetDinh(
-            String rawSessionCookie,
-            UUID taiKhoanId,
-            String maYDinh,
-            String duLieuBam,
-            UUID tinId,
-            UUID phienBanId,
-            String ketQua,
-            String lyDo,
-            long phienBanCapNhatDaXem
-    ) {
+        boolean pheDuyet = QUYET_DINH_PHE_DUYET.equals(yeuCau.quyetDinh());
         try {
             return permissionAndCsrfService.thucThiGhiCoKiemLaiQuyenTrongTransaction(
                     rawSessionCookie,
@@ -202,10 +164,10 @@ public class KiemDuyetService {
                     null,
                     freshPrincipal -> kiemDuyetRepository.quyetDinhTrongTransaction(new DuLieuQuyetDinh(
                             tinId,
-                            phienBanId,
+                            yeuCau.phienBanDaXemId(),
                             freshPrincipal.getTaiKhoanId(),
-                            ketQua,
-                            lyDo,
+                            pheDuyet,
+                            pheDuyet ? null : yeuCau.lyDo(),
                             phienBanCapNhatDaXem,
                             clock.instant(),
                             maYDinh,
@@ -215,7 +177,7 @@ public class KiemDuyetService {
         } catch (LoiNghiepVuKiemDuyetException ex) {
             throw chuyenLoiNghiepVu(ex);
         } catch (DuplicateKeyException ex) {
-            Optional<KetQuaYeuCauQuyetDinh> replay = traCuuYeuCauQuyetDinh(taiKhoanId, maYDinh);
+            Optional<KetQuaYeuCauQuyetDinh> replay = traCuuYeuCauQuyetDinh(nguoiDuyet.getTaiKhoanId(), maYDinh);
             if (replay.isPresent()) {
                 return phatLai(replay.get(), duLieuBam);
             }
@@ -230,27 +192,72 @@ public class KiemDuyetService {
         }
     }
 
+    record YeuCauQuyetDinh(UUID phienBanDaXemId, String quyetDinh, String lyDo) {
+    }
+
+    /** QuyetDinhRequest với additionalProperties: false; lyDo bắt buộc khi tu_choi. */
+    static YeuCauQuyetDinh docYeuCauQuyetDinh(Map<String, Object> rawBody) {
+        Map<String, Object> than = rawBody == null ? Map.of() : rawBody;
+        List<FieldErrorItem> loi = new ArrayList<>();
+        for (String khoa : than.keySet()) {
+            if (khoa == null || !CAC_TRUONG_QUYET_DINH.contains(khoa)) {
+                loi.add(loiMuc(String.valueOf(khoa), "Trường không được phép trong yêu cầu quyết định."));
+            }
+        }
+
+        UUID phienBanDaXemId = null;
+        Object phienBanTho = than.get(TRUONG_PHIEN_BAN_DA_XEM);
+        if (phienBanTho instanceof String chuoi && UUID_CHUAN.matcher(chuoi).matches()) {
+            phienBanDaXemId = UUID.fromString(chuoi);
+        } else {
+            loi.add(loiMuc(TRUONG_PHIEN_BAN_DA_XEM, "Trường bắt buộc, phải là mã phiên bản dạng UUID."));
+        }
+
+        String quyetDinh = null;
+        Object quyetDinhTho = than.get(TRUONG_QUYET_DINH);
+        if (QUYET_DINH_PHE_DUYET.equals(quyetDinhTho) || QUYET_DINH_TU_CHOI.equals(quyetDinhTho)) {
+            quyetDinh = (String) quyetDinhTho;
+        } else {
+            loi.add(loiMuc(TRUONG_QUYET_DINH, "Trường bắt buộc, chỉ nhận: phe_duyet, tu_choi."));
+        }
+
+        String lyDo = null;
+        boolean coLyDo = than.containsKey(TRUONG_LY_DO);
+        Object lyDoTho = than.get(TRUONG_LY_DO);
+        if (coLyDo || QUYET_DINH_TU_CHOI.equals(quyetDinh)) {
+            if (!(lyDoTho instanceof String chuoi) || chuoi.isBlank()) {
+                loi.add(loiMuc(TRUONG_LY_DO, "Lý do là bắt buộc khi từ chối và không được để trống."));
+            } else if (chuoi.trim().length() > DO_DAI_LY_DO_TOI_DA) {
+                loi.add(loiMuc(TRUONG_LY_DO, "Lý do tối đa " + DO_DAI_LY_DO_TOI_DA + " ký tự."));
+            } else {
+                lyDo = chuoi.trim();
+            }
+        }
+
+        if (!loi.isEmpty()) {
+            throw new AuthValidationException(MA_LOI_DU_LIEU_KHONG_HOP_LE, THONG_DIEP_KHONG_HOP_LE, loi);
+        }
+        return new YeuCauQuyetDinh(phienBanDaXemId, quyetDinh, lyDo);
+    }
+
+    private PrincipalPhienHienTai kiemTraQuyenKdv(String rawSessionCookie) {
+        return permissionAndCsrfService.kiemTraQuyenThaoTac(
+                rawSessionCookie,
+                ThaoTacNghiepVu.XEM_HANG_CHO_VA_DUYET_TIN,
+                null,
+                null
+        );
+    }
+
     private Optional<KetQuaYeuCauQuyetDinh> traCuuYeuCauQuyetDinh(UUID taiKhoanId, String maYDinh) {
         try {
             return kiemDuyetRepository.timYeuCauQuyetDinh(taiKhoanId, maYDinh);
-        } catch (AuthProviderUnavailableException ex) {
-            throw ex;
         } catch (RuntimeException ex) {
             throw new AuthProviderUnavailableException(THONG_DIEP_GIAN_DOAN, ex);
         }
     }
 
-    private List<MucHangCho> docHangChoAnToan(ConTroHangCho conTro, int gioiHan) {
-        try {
-            return kiemDuyetRepository.docHangCho(conTro, gioiHan);
-        } catch (AuthProviderUnavailableException ex) {
-            throw ex;
-        } catch (RuntimeException ex) {
-            throw new AuthProviderUnavailableException(THONG_DIEP_GIAN_DOAN, ex);
-        }
-    }
-
-    private static KetQuaQuyetDinh phatLai(KetQuaYeuCauQuyetDinh daLuu, String duLieuBam) {
+    private static TinGhiKetQua phatLai(KetQuaYeuCauQuyetDinh daLuu, String duLieuBam) {
         if (!daLuu.duLieuBam().equals(duLieuBam)) {
             throw new ListingConflictException(
                     ListingConflictException.MA_LOI_MA_Y_DINH_KHAC_NOI_DUNG,
@@ -260,8 +267,8 @@ public class KiemDuyetService {
         return daLuu.ketQua();
     }
 
-    private static String duongDan(UUID tinId, UUID phienBanId, String hanhDong) {
-        return "/api/moderation/listings/" + tinId + "/versions/" + phienBanId + "/" + hanhDong;
+    public static String duongDanQuyetDinh(UUID tinId) {
+        return "/api/moderation/listings/" + tinId.toString().toLowerCase(Locale.ROOT) + "/decision";
     }
 
     static String chuanHoaVaKiemTraMaYDinh(String rawIdempotencyKey) {
@@ -282,7 +289,7 @@ public class KiemDuyetService {
         if (rawIfMatch == null || rawIfMatch.isBlank()) {
             throw new ListingPreconditionException(
                     ListingPreconditionException.MA_LOI_THIEU_IF_MATCH,
-                    "Thiếu header If-Match. Hãy tải lại chi tiết phiên bản để lấy ETag hiện tại."
+                    "Thiếu header If-Match. Hãy tải lại bản cần duyệt để lấy ETag hiện tại."
             );
         }
         String giaTri = rawIfMatch.trim();
@@ -296,66 +303,55 @@ public class KiemDuyetService {
         throw loiIfMatchKhongHopLe();
     }
 
-    static String docLyDo(Map<String, Object> rawBody) {
-        Object tho = rawBody == null ? null : rawBody.get(TRUONG_LY_DO);
-        if (!(tho instanceof String chuoi) || chuoi.isBlank()) {
-            throw loiTruong(TRUONG_LY_DO, "Lý do từ chối là bắt buộc và không được để trống.");
+    /** Không clamp: giá trị ngoài khoảng là 400. */
+    static int docSoTrongKhoang(
+            String raw,
+            String truong,
+            int macDinh,
+            int toiThieu,
+            int toiDa,
+            List<FieldErrorItem> loi
+    ) {
+        if (raw == null) {
+            return macDinh;
         }
-        String lyDo = chuoi.trim();
-        if (lyDo.length() > DO_DAI_LY_DO_TOI_DA) {
-            throw loiTruong(TRUONG_LY_DO, "Lý do từ chối tối đa " + DO_DAI_LY_DO_TOI_DA + " ký tự.");
-        }
-        return lyDo;
-    }
-
-    static int docGioiHan(String rawLimit) {
-        if (rawLimit == null || rawLimit.isBlank()) {
-            return GIOI_HAN_MAC_DINH;
-        }
-        String giaTri = rawLimit.trim();
-        if (SO_NGUYEN_DUONG.matcher(giaTri).matches()) {
-            int gioiHan = Integer.parseInt(giaTri);
-            if (gioiHan >= 1 && gioiHan <= GIOI_HAN_TOI_DA) {
-                return gioiHan;
+        String giaTri = raw.trim();
+        if (SO_NGUYEN_KHONG_AM.matcher(giaTri).matches()) {
+            int so = Integer.parseInt(giaTri);
+            if (so >= toiThieu && so <= toiDa) {
+                return so;
             }
         }
-        throw loiTruong("limit", "limit phải là số nguyên từ 1 đến " + GIOI_HAN_TOI_DA + ".");
-    }
-
-    static ConTroHangCho docConTro(String rawCursor) {
-        if (rawCursor == null || rawCursor.isEmpty()) {
-            return null;
-        }
-        return ConTroHangCho.giaiMa(rawCursor.trim())
-                .orElseThrow(() -> loiTruong("cursor", "cursor không hợp lệ."));
+        loi.add(loiMuc(truong, truong + " phải là số nguyên từ " + toiThieu + " đến " + toiDa + "."));
+        return macDinh;
     }
 
     private static AuthValidationException loiIfMatchKhongHopLe() {
         return loiTruong(
                 HEADER_IF_MATCH,
-                "If-Match phải là ETag mạnh dạng \"số\" lấy từ chi tiết phiên bản."
+                "If-Match phải là ETag mạnh dạng \"số\" lấy từ bản cần duyệt."
         );
     }
 
+    private static FieldErrorItem loiMuc(String truong, String thongDiep) {
+        return new FieldErrorItem(truong, MA_LOI_DU_LIEU_KHONG_HOP_LE, thongDiep);
+    }
+
     private static AuthValidationException loiTruong(String truong, String thongDiep) {
-        return new AuthValidationException(
-                MA_LOI_DU_LIEU_KHONG_HOP_LE,
-                THONG_DIEP_KHONG_HOP_LE,
-                List.of(new FieldErrorItem(truong, MA_LOI_DU_LIEU_KHONG_HOP_LE, thongDiep))
-        );
+        return new AuthValidationException(MA_LOI_DU_LIEU_KHONG_HOP_LE, THONG_DIEP_KHONG_HOP_LE, List.of(loiMuc(truong, thongDiep)));
     }
 
     private static RuntimeException chuyenLoiNghiepVu(LoiNghiepVuKiemDuyetException ex) {
         return switch (ex.getLoaiLoi()) {
-            case TIN_KHONG_TON_TAI, PHIEN_BAN_KHONG_THUOC_TIN -> new ListingNotFoundException();
-            case TIN_DA_XOA -> new ListingConflictException(KiemDuyetMaLoi.TIN_DA_XOA, ex.getMessage());
-            case TIN_DA_BI_GO -> new ListingConflictException(KiemDuyetMaLoi.TIN_DA_BI_GO, ex.getMessage());
+            case TIN_KHONG_TON_TAI -> new ListingNotFoundException();
             case PHIEN_BAN_CU -> new ListingPreconditionException(
                     ListingPreconditionException.MA_LOI_PHIEN_BAN_CU,
                     ex.getMessage()
             );
-            case PHIEN_BAN_DA_CU -> new ListingConflictException(KiemDuyetMaLoi.PHIEN_BAN_DA_CU, ex.getMessage());
-            case DA_CO_QUYET_DINH -> new ListingConflictException(KiemDuyetMaLoi.DA_CO_QUYET_DINH, ex.getMessage());
+            case TRANG_THAI_KHONG_HOP_LE, KHONG_DAT_BR03 -> new ListingConflictException(
+                    ListingConflictException.MA_LOI_TRANG_THAI_KHONG_HOP_LE,
+                    ex.getMessage()
+            );
             case XUNG_DOT_MA_Y_DINH -> new ListingConflictException(
                     ListingConflictException.MA_LOI_MA_Y_DINH_KHAC_NOI_DUNG,
                     ex.getMessage()

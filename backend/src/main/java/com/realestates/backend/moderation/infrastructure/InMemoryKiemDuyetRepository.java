@@ -1,10 +1,8 @@
 package com.realestates.backend.moderation.infrastructure;
 
-import com.realestates.backend.moderation.domain.ConTroHangCho;
+import com.realestates.backend.listing.dto.TinGhiKetQua;
 import com.realestates.backend.moderation.domain.KiemDuyetRepository;
-import com.realestates.backend.moderation.dto.ChiTietPhienBanResponse;
-import com.realestates.backend.moderation.dto.KetQuaQuyetDinh;
-import com.realestates.backend.moderation.dto.MucHangCho;
+import com.realestates.backend.moderation.dto.TinQuanLy;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -20,12 +18,17 @@ import org.springframework.stereotype.Repository;
 public class InMemoryKiemDuyetRepository implements KiemDuyetRepository {
 
     @Override
-    public List<MucHangCho> docHangCho(ConTroHangCho sau, int gioiHan) {
+    public List<TinQuanLy> docHangCho(int boQua, int gioiHan) {
         return List.of();
     }
 
     @Override
-    public Optional<ChiTietPhienBanResponse> docChiTietPhienBan(UUID tinId, UUID phienBanId) {
+    public long demHangCho() {
+        return 0L;
+    }
+
+    @Override
+    public Optional<TinQuanLy> docTinCanDuyet(UUID tinId) {
         return Optional.empty();
     }
 
@@ -35,7 +38,7 @@ public class InMemoryKiemDuyetRepository implements KiemDuyetRepository {
     }
 
     @Override
-    public KetQuaQuyetDinh quyetDinhTrongTransaction(DuLieuQuyetDinh duLieu) {
+    public TinGhiKetQua quyetDinhTrongTransaction(DuLieuQuyetDinh duLieu) {
         throw new LoiNghiepVuKiemDuyetException(LoaiLoiKiemDuyet.TIN_KHONG_TON_TAI, "Không tìm thấy tin.");
     }
 }
