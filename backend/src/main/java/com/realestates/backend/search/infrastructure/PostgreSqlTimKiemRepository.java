@@ -5,6 +5,7 @@ import com.realestates.backend.search.domain.ChuanHoaTimKiem;
 import com.realestates.backend.search.domain.QuyDoiGiaTimKiem;
 import com.realestates.backend.search.domain.SapXepTin;
 import com.realestates.backend.search.domain.TimKiemRepository;
+import com.realestates.backend.search.domain.TinCongKhai;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.Instant;
@@ -132,12 +133,9 @@ public class PostgreSqlTimKiemRepository implements TimKiemRepository {
                            EXISTS (SELECT 1 FROM se214.goi_day_tin g
                                    WHERE g.tin_id = t.id AND g.trang_thai = 'dang_hoat_dong'
                                      AND g.het_han_luc > moc.ts) AS co_tai_tro
-                    FROM se214.tin_bat_dong_san t
-                    JOIN se214.tai_khoan chu ON chu.id = t.chu_id
-                    JOIN se214.phien_ban_tin p ON p.id = t.phien_ban_da_duyet_id AND p.tin_id = t.id
+                    FROM %s
                     CROSS JOIN moc%s
-                    WHERE t.trang_thai = 'da_duyet'
-                      AND chu.trang_thai = 'hoat_dong'%s
+                    WHERE %s%s
                 ),
                 tu_nhien AS (SELECT * FROM hop_le WHERE NOT co_tai_tro),
                 trang AS (
@@ -164,10 +162,11 @@ public class PostgreSqlTimKiemRepository implements TimKiemRepository {
                     ORDER BY ai.thu_tu ASC LIMIT 1
                 ) a ON true
                 ORDER BY k.khu, k.thu_tu
-                """.formatted(hang, tuKhoaJoin, loc, thuTu, COT_TIN, thuTu, COT_TIN);
+                """.formatted(hang, TinCongKhai.TU_BANG, tuKhoaJoin, TinCongKhai.DIEU_KIEN, loc, thuTu, COT_TIN, thuTu, COT_TIN);
     }
 
-    private static DongTin anhXa(ResultSet rs) throws SQLException {
+    /** Ánh xạ cột tóm tắt tin (dùng chung với yêu thích). */
+    public static DongTin anhXa(ResultSet rs) throws SQLException {
         return new DongTin(
                 rs.getObject("tin_id", UUID.class),
                 rs.getObject("phien_ban_id", UUID.class),

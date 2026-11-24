@@ -96,7 +96,7 @@ public class TimKiemTinService {
         );
     }
 
-    static TinTomTat tomTat(DongTin dong, KieuGia cheDo) {
+    public static TinTomTat tomTat(DongTin dong, KieuGia cheDo) {
         QuyDoiGiaTimKiem quyDoi = QuyDoiGiaTimKiem.tu(dong.donViGia(), cheDo, dong.giaGoc(), dong.dienTichM2());
         return new TinTomTat(
                 dong.tinId(),
