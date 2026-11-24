@@ -1,38 +1,41 @@
 package com.realestates.backend.search.infrastructure;
 
-import com.realestates.backend.listing.domain.LoaiBds;
 import com.realestates.backend.search.domain.BoLocTimKiem;
-import com.realestates.backend.search.domain.ConTroTimKiem;
+import com.realestates.backend.search.domain.ChuanHoaTimKiem;
+import com.realestates.backend.search.domain.QuyDoiGiaTimKiem;
 import com.realestates.backend.search.domain.SapXepTin;
 import com.realestates.backend.search.domain.TimKiemRepository;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Repository;
 
 /**
- * Tìm kiếm công khai trên PostgreSQL. Luôn hiển thị và lọc theo phiên bản ĐÃ DUYỆT (p.id = t.phien_ban_da_duyet_id).
- * Mọi giá trị người dùng đi qua tham số có tên; sắp xếp/kiểu giá chỉ chọn từ enum nên các đoạn SQL nối chuỗi đều là hằng.
+ * Tìm kiếm công khai trong MỘT câu SQL (TK-09): một mốc statement_timestamp() dùng chung cho tập hợp lệ,
+ * tổng số tự nhiên, trang tự nhiên và mẫu tài trợ, nên một tin không thể nằm ở cả hai khu.
+ * Mọi giá trị người dùng đi qua tham số có tên; các đoạn SQL nối chuỗi đều là hằng chọn từ enum.
  */
 @Repository
 @ConditionalOnProperty(name = "app.repository.type", havingValue = "postgres")
 public class PostgreSqlTimKiemRepository implements TimKiemRepository {
 
-    private static final String CAC_COT = """
-            t.id AS tin_id, p.tieu_de, p.loai_giao_dich, p.loai_bds, p.khu_vuc, p.dia_chi,
-                   p.gia_goc, p.don_vi_gia, p.dien_tich_m2, t.ngay_dang,
-                   (SELECT a.khoa_anh_hien_thi FROM se214.anh_tin a
-                     WHERE a.phien_ban_tin_id = p.id AND a.trang_thai = 'da_gan'
-                     ORDER BY a.thu_tu ASC LIMIT 1) AS anh_dai_dien""";
+    private static final String VECTOR_TIM_KIEM =
+            "setweight(to_tsvector('simple', " + ChuanHoaTimKiem.sql("p.tieu_de") + "), 'A')"
+                    + " || setweight(to_tsvector('simple', "
+                    + ChuanHoaTimKiem.sql("p.khu_vuc || ' ' || p.dia_chi") + "), 'B')"
+                    + " || setweight(to_tsvector('simple', " + ChuanHoaTimKiem.sql("p.mo_ta") + "), 'C')";
 
-    private static final RowMapper<DongTin> ROW_MAPPER = PostgreSqlTimKiemRepository::anhXa;
+    private static final String COT_TIN = """
+            tin_id, phien_ban_id, tieu_de, loai_giao_dich, loai_bds, gia_goc, don_vi_gia, dien_tich_m2,
+            khu_vuc, vi_do, kinh_do, ngay_dang""";
 
     private final NamedParameterJdbcTemplate jdbc;
 
@@ -41,149 +44,145 @@ public class PostgreSqlTimKiemRepository implements TimKiemRepository {
     }
 
     @Override
-    public List<DongTin> docTaiTro(BoLocTimKiem boLoc, int toiDa) {
+    public KetQua timKiem(BoLocTimKiem boLoc, int soTaiTroToiDa) {
         MapSqlParameterSource tham = new MapSqlParameterSource();
-        StringBuilder sql = new StringBuilder("SELECT ")
-                .append(CAC_COT)
-                .append(", CAST(NULL AS text) AS khoa_sap_xep\n");
-        sql.append(tuKhoaTin("t", "p"));
-        themDieuKienTaiTro(sql, tham, boLoc, "t", "p");
-        sql.append("\nORDER BY t.ngay_dang ASC, t.id ASC\nLIMIT :gioiHan");
-        tham.addValue("gioiHan", toiDa);
-        return jdbc.query(sql.toString(), tham, ROW_MAPPER);
+        String sql = xayDungSql(boLoc, tham);
+        tham.addValue("kichThuoc", boLoc.kichThuoc());
+        tham.addValue("boQua", (long) boLoc.trang() * boLoc.kichThuoc());
+        tham.addValue("soTaiTro", soTaiTroToiDa);
+
+        List<DongTin> tuNhien = new ArrayList<>();
+        List<DongTin> taiTro = new ArrayList<>();
+        long[] tongSo = {0};
+        Instant[] thoiDiem = {null};
+        jdbc.query(sql, tham, (ResultSet rs) -> {
+            tongSo[0] = rs.getLong("tong_so");
+            thoiDiem[0] = rs.getTimestamp("thoi_diem").toInstant();
+            String khu = rs.getString("khu");
+            if ("tu_nhien".equals(khu)) {
+                tuNhien.add(anhXa(rs));
+            } else if ("tai_tro".equals(khu)) {
+                taiTro.add(anhXa(rs));
+            }
+        });
+        return new KetQua(List.copyOf(tuNhien), tongSo[0], List.copyOf(taiTro), thoiDiem[0]);
     }
 
-    @Override
-    public List<DongTin> docTuNhien(
-            BoLocTimKiem boLoc,
-            SapXepTin sapXep,
-            ConTroTimKiem sau,
-            int toiDaTaiTro,
-            int gioiHan
-    ) {
-        MapSqlParameterSource tham = new MapSqlParameterSource();
-        String khoa = bieuThucKhoa(sapXep, boLoc, "p", "t");
-        String huong = sapXep.laTangDan() ? "ASC" : "DESC";
-
-        StringBuilder sql = new StringBuilder("SELECT ")
-                .append(CAC_COT)
-                .append(", CAST(").append(khoa).append(" AS text) AS khoa_sap_xep\n");
-        sql.append(tuKhoaTin("t", "p"));
-        themDieuKienLoc(sql, tham, boLoc, "t", "p");
-        if (sau != null) {
-            String kieuKhoa = sapXep.laTheoThoiGian() ? "timestamptz" : "numeric";
-            String soSanh = sapXep.laTangDan() ? ">" : "<";
-            sql.append("\n  AND (").append(khoa).append(", t.id) ").append(soSanh)
-                    .append(" (CAST(:khoaSau AS ").append(kieuKhoa).append("), CAST(:idSau AS uuid))");
-            tham.addValue("khoaSau", sau.khoa());
-            tham.addValue("idSau", sau.tinId().toString());
+    static String xayDungSql(BoLocTimKiem boLoc, MapSqlParameterSource tham) {
+        StringBuilder loc = new StringBuilder();
+        String hang = "CAST(0 AS real)";
+        String tuKhoaJoin = "";
+        if (boLoc.coTuKhoa()) {
+            tuKhoaJoin = "\n    CROSS JOIN LATERAL (SELECT " + VECTOR_TIM_KIEM + " AS vb) v"
+                    + "\n    CROSS JOIN LATERAL (SELECT plainto_tsquery('simple', :tuKhoa) AS q) tq";
+            loc.append("\n      AND v.vb @@ tq.q");
+            hang = "ts_rank(v.vb, tq.q)";
+            tham.addValue("tuKhoa", String.join(" ", boLoc.tuKhoa()));
         }
-        // Loại đúng các tin đã được chọn vào khối tài trợ (cùng bộ lọc, cùng thứ tự, LIMIT như nhau) trên MỌI trang.
-        sql.append("\n  AND t.id NOT IN (SELECT s.id FROM (\n")
-                .append(truyVanIdTaiTro(boLoc, tham, "ts", "ps"))
-                .append("\n) s)");
-        sql.append("\nORDER BY ").append(khoa).append(' ').append(huong)
-                .append(", t.id ").append(huong)
-                .append("\nLIMIT :gioiHan");
-        tham.addValue("soTaiTro", toiDaTaiTro);
-        tham.addValue("gioiHan", gioiHan);
-        return jdbc.query(sql.toString(), tham, ROW_MAPPER);
-    }
-
-    private static String truyVanIdTaiTro(BoLocTimKiem boLoc, MapSqlParameterSource tham, String t, String p) {
-        StringBuilder sql = new StringBuilder("SELECT ").append(t).append(".id AS id\n");
-        sql.append(tuKhoaTin(t, p));
-        themDieuKienTaiTro(sql, tham, boLoc, t, p);
-        sql.append("\nORDER BY ").append(t).append(".ngay_dang ASC, ").append(t).append(".id ASC\nLIMIT :soTaiTro");
-        return sql.toString();
-    }
-
-    private static String tuKhoaTin(String t, String p) {
-        return "FROM se214.tin_bat_dong_san " + t + "\n"
-                + "JOIN se214.phien_ban_tin " + p + " ON " + p + ".id = " + t + ".phien_ban_da_duyet_id AND "
-                + p + ".tin_id = " + t + ".id\n";
-    }
-
-    /** Hiển thị công khai + bộ lọc; bắt đầu bằng WHERE, các điều kiện sau nối bằng AND. */
-    private static void themDieuKienLoc(
-            StringBuilder sql,
-            MapSqlParameterSource tham,
-            BoLocTimKiem boLoc,
-            String t,
-            String p
-    ) {
-        sql.append("WHERE ").append(t).append(".phien_ban_da_duyet_id IS NOT NULL")
-                .append("\n  AND ").append(t).append(".trang_thai NOT IN ('da_xoa', 'bi_go_vi_pham')");
         if (boLoc.loaiGiaoDich() != null) {
-            sql.append("\n  AND ").append(p).append(".loai_giao_dich = :loaiGiaoDich");
+            loc.append("\n      AND p.loai_giao_dich = :loaiGiaoDich");
             tham.addValue("loaiGiaoDich", boLoc.loaiGiaoDich().getGiaTri());
         }
-        if (!boLoc.loaiBds().isEmpty()) {
-            sql.append("\n  AND ").append(p).append(".loai_bds IN (:loaiBds)");
-            tham.addValue("loaiBds", boLoc.loaiBds().stream().map(LoaiBds::getGiaTri).toList());
+        if (boLoc.loaiBds() != null) {
+            loc.append("\n      AND p.loai_bds = :loaiBds");
+            tham.addValue("loaiBds", boLoc.loaiBds().getGiaTri());
         }
         if (boLoc.khuVuc() != null) {
-            sql.append("\n  AND lower(btrim(").append(p).append(".khu_vuc)) = lower(btrim(CAST(:khuVuc AS text)))");
+            loc.append("\n      AND strpos(").append(ChuanHoaTimKiem.sql("p.khu_vuc || ' ' || p.dia_chi"))
+                    .append(", :khuVuc) > 0");
             tham.addValue("khuVuc", boLoc.khuVuc());
         }
-        if (boLoc.giaTu() != null || boLoc.giaDen() != null) {
-            String gia = BieuThucGiaSql.theoKieu(boLoc.kieuGia(), p);
-            if (boLoc.giaTu() != null) {
-                sql.append("\n  AND ").append(gia).append(" >= :giaTu");
-                tham.addValue("giaTu", boLoc.giaTu());
-            }
-            if (boLoc.giaDen() != null) {
-                sql.append("\n  AND ").append(gia).append(" <= :giaDen");
-                tham.addValue("giaDen", boLoc.giaDen());
-            }
+        // TK-06: nhân chéo trên phân số chính xác N/D, không làm tròn trước khi so sánh.
+        String tu = QuyDoiGiaTimKiem.sqlTu("p");
+        String mau = QuyDoiGiaTimKiem.sqlMau("p", boLoc.cheDoGia());
+        if (boLoc.giaMin() != null) {
+            loc.append("\n      AND ").append(tu).append(" >= CAST(:giaMin AS numeric) * ").append(mau);
+            tham.addValue("giaMin", boLoc.giaMin());
         }
-        if (boLoc.dienTichTu() != null) {
-            sql.append("\n  AND ").append(p).append(".dien_tich_m2 >= :dienTichTu");
-            tham.addValue("dienTichTu", boLoc.dienTichTu());
+        if (boLoc.giaMax() != null) {
+            loc.append("\n      AND ").append(tu).append(" <= CAST(:giaMax AS numeric) * ").append(mau);
+            tham.addValue("giaMax", boLoc.giaMax());
         }
-        if (boLoc.dienTichDen() != null) {
-            sql.append("\n  AND ").append(p).append(".dien_tich_m2 <= :dienTichDen");
-            tham.addValue("dienTichDen", boLoc.dienTichDen());
+        if (boLoc.dienTichMin() != null) {
+            loc.append("\n      AND p.dien_tich_m2 >= CAST(:dienTichMin AS numeric)");
+            tham.addValue("dienTichMin", boLoc.dienTichMin());
         }
+        if (boLoc.dienTichMax() != null) {
+            loc.append("\n      AND p.dien_tich_m2 <= CAST(:dienTichMax AS numeric)");
+            tham.addValue("dienTichMax", boLoc.dienTichMax());
+        }
+        if (boLoc.coVung()) {
+            loc.append("\n      AND p.vi_do BETWEEN CAST(:nam AS numeric) AND CAST(:bac AS numeric)")
+                    .append("\n      AND p.kinh_do BETWEEN CAST(:tay AS numeric) AND CAST(:dong AS numeric)");
+            tham.addValue("nam", boLoc.nam());
+            tham.addValue("bac", boLoc.bac());
+            tham.addValue("tay", boLoc.tay());
+            tham.addValue("dong", boLoc.dong());
+        }
+        String thuTu = boLoc.sapXep() == SapXepTin.MAC_DINH && boLoc.coTuKhoa()
+                ? "hang DESC, ngay_dang DESC, tin_id ASC"
+                : "ngay_dang DESC, tin_id ASC";
+
+        return """
+                WITH moc AS MATERIALIZED (SELECT statement_timestamp() AS ts),
+                hop_le AS MATERIALIZED (
+                    SELECT t.id AS tin_id, p.id AS phien_ban_id, p.tieu_de, p.loai_giao_dich, p.loai_bds, p.gia_goc,
+                           p.don_vi_gia, p.dien_tich_m2, p.khu_vuc, p.vi_do, p.kinh_do, t.ngay_dang,
+                           %s AS hang,
+                           EXISTS (SELECT 1 FROM se214.goi_day_tin g
+                                   WHERE g.tin_id = t.id AND g.trang_thai = 'dang_hoat_dong'
+                                     AND g.het_han_luc > moc.ts) AS co_tai_tro
+                    FROM se214.tin_bat_dong_san t
+                    JOIN se214.tai_khoan chu ON chu.id = t.chu_id
+                    JOIN se214.phien_ban_tin p ON p.id = t.phien_ban_da_duyet_id AND p.tin_id = t.id
+                    CROSS JOIN moc%s
+                    WHERE t.trang_thai = 'da_duyet'
+                      AND chu.trang_thai = 'hoat_dong'%s
+                ),
+                tu_nhien AS (SELECT * FROM hop_le WHERE NOT co_tai_tro),
+                trang AS (
+                    SELECT 'tu_nhien' AS khu, row_number() OVER (ORDER BY %s) AS thu_tu, %s
+                    FROM tu_nhien
+                    ORDER BY %s
+                    LIMIT :kichThuoc OFFSET :boQua
+                ),
+                tai_tro AS (
+                    SELECT 'tai_tro' AS khu, CAST(0 AS bigint) AS thu_tu, %s
+                    FROM hop_le
+                    WHERE co_tai_tro
+                    ORDER BY random(), tin_id
+                    LIMIT :soTaiTro
+                ),
+                ket_qua AS (SELECT * FROM trang UNION ALL SELECT * FROM tai_tro),
+                meta AS (SELECT (SELECT count(*) FROM tu_nhien) AS tong_so, ts AS thoi_diem FROM moc)
+                SELECT m.tong_so, m.thoi_diem, k.*, a.id AS anh_id, a.thu_tu AS anh_thu_tu
+                FROM meta m
+                LEFT JOIN ket_qua k ON true
+                LEFT JOIN LATERAL (
+                    SELECT ai.id, ai.thu_tu FROM se214.anh_tin ai
+                    WHERE ai.phien_ban_tin_id = k.phien_ban_id AND ai.trang_thai = 'da_gan'
+                    ORDER BY ai.thu_tu ASC LIMIT 1
+                ) a ON true
+                ORDER BY k.khu, k.thu_tu
+                """.formatted(hang, tuKhoaJoin, loc, thuTu, COT_TIN, thuTu, COT_TIN);
     }
 
-    /** Điều kiện lọc + gói đẩy tin đang hoạt động và chưa hết hạn. */
-    private static void themDieuKienTaiTro(
-            StringBuilder sql,
-            MapSqlParameterSource tham,
-            BoLocTimKiem boLoc,
-            String t,
-            String p
-    ) {
-        themDieuKienLoc(sql, tham, boLoc, t, p);
-        sql.append("\n  AND EXISTS (SELECT 1 FROM se214.goi_day_tin g WHERE g.tin_id = ").append(t).append(".id")
-                .append(" AND g.trang_thai = 'dang_hoat_dong' AND g.het_han_luc > now())");
-    }
-
-    private static String bieuThucKhoa(SapXepTin sapXep, BoLocTimKiem boLoc, String p, String t) {
-        if (sapXep.laTheoThoiGian()) {
-            return t + ".ngay_dang";
-        }
-        if (sapXep.laTheoGia()) {
-            return BieuThucGiaSql.theoKieu(boLoc.kieuGia(), p);
-        }
-        return p + ".dien_tich_m2";
-    }
-
-    private static DongTin anhXa(ResultSet rs, int rowNum) throws SQLException {
+    private static DongTin anhXa(ResultSet rs) throws SQLException {
         return new DongTin(
                 rs.getObject("tin_id", UUID.class),
+                rs.getObject("phien_ban_id", UUID.class),
                 rs.getString("tieu_de"),
                 rs.getString("loai_giao_dich"),
                 rs.getString("loai_bds"),
-                rs.getString("khu_vuc"),
-                rs.getString("dia_chi"),
                 rs.getBigDecimal("gia_goc"),
                 rs.getString("don_vi_gia"),
                 rs.getBigDecimal("dien_tich_m2"),
-                rs.getString("anh_dai_dien"),
+                rs.getString("khu_vuc"),
+                rs.getBigDecimal("vi_do"),
+                rs.getBigDecimal("kinh_do"),
                 rs.getTimestamp("ngay_dang").toInstant(),
-                rs.getString("khoa_sap_xep")
+                rs.getObject("anh_id", UUID.class),
+                rs.getObject("anh_thu_tu", Integer.class)
         );
     }
 }
