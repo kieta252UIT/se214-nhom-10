@@ -259,6 +259,10 @@ public final class TimKiemPgTestSupport {
         return quanLyTinService.xoaTin(tin.chu().rawCookie(), tin.tinId(), "xoa-" + UUID.randomUUID(), etag(tin.tinId()));
     }
 
+    public void khoaChu(TinTao tin) {
+        jdbcTemplate.update("UPDATE se214.tai_khoan SET trang_thai = 'bi_khoa' WHERE id = ?", tin.chu().taiKhoan().getId());
+    }
+
     public void datNgayDang(UUID tinId, Instant ngayDang) {
         jdbcTemplate.update("UPDATE se214.tin_bat_dong_san SET ngay_dang = ? WHERE id = ?", Timestamp.from(ngayDang), tinId);
     }

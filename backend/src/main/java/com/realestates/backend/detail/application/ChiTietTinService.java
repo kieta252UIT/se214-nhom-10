@@ -1,31 +1,27 @@
 package com.realestates.backend.detail.application;
 
 import com.realestates.backend.auth.application.CurrentPermissionAndCsrfService;
-import com.realestates.backend.auth.domain.PrincipalPhienHienTai;
 import com.realestates.backend.auth.domain.ThaoTacNghiepVu;
-import com.realestates.backend.auth.domain.VaiTroTaiKhoan;
 import com.realestates.backend.auth.exception.AuthProviderUnavailableException;
 import com.realestates.backend.detail.domain.ChiTietTinRepository;
 import com.realestates.backend.detail.domain.ChiTietTinRepository.DongChiTiet;
-import com.realestates.backend.detail.domain.ChiTietTinRepository.DongLienHe;
-import com.realestates.backend.detail.dto.AnhChiTietItem;
-import com.realestates.backend.detail.dto.ChiTietTinResponse;
-import com.realestates.backend.detail.dto.LienHeChuTinResponse;
-import com.realestates.backend.domain.model.PriceConverter;
-import com.realestates.backend.listing.domain.DonViGiaTin;
+import com.realestates.backend.detail.dto.LienHeChuTin;
+import com.realestates.backend.detail.dto.PhienBanNoiDung;
+import com.realestates.backend.detail.dto.TinCongKhai;
 import com.realestates.backend.listing.exception.ListingNotFoundException;
-import com.realestates.backend.search.application.TimKiemTinService;
-import java.util.List;
+import com.realestates.backend.search.domain.KieuGia;
+import com.realestates.backend.search.domain.QuyDoiGiaTimKiem;
+import com.realestates.backend.search.dto.AnhHienThi;
+import com.realestates.backend.search.dto.GiaQuyDoiHienThi;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
-import java.util.function.Supplier;
 import java.util.regex.Pattern;
 import org.springframework.stereotype.Service;
 
 /**
- * Chi tiết và liên hệ của tin công khai (khách được phép). Mọi trường hợp không xem được (id sai định dạng,
- * không tồn tại, chưa duyệt, đã xóa/gỡ, chủ bị khóa khi xem liên hệ) đều là cùng một 404 KHONG_TIM_THAY, không lộ lý do.
+ * GET /api/listings/{listingId} (xemTinCongKhai, khách được phép). Mọi trường hợp không xem được (id sai định dạng,
+ * không tồn tại, không đạt BR-01) đều là cùng một 404 KHONG_TIM_THAY, không lộ lý do.
  */
 @Service
 public class ChiTietTinService {
@@ -46,52 +42,42 @@ public class ChiTietTinService {
         this.chiTietTinRepository = Objects.requireNonNull(chiTietTinRepository, "chiTietTinRepository không được null");
     }
 
-    public ChiTietTinResponse chiTiet(String rawSessionCookie, String listingId) {
-        PrincipalPhienHienTai principal = permissionAndCsrfService.kiemTraQuyenThaoTac(
-                rawSessionCookie, ThaoTacNghiepVu.XEM_CHI_TIET_TIN_DA_DUYET, null, null);
-        UUID tinId = docTinId(listingId);
-        UUID nguoiXemId = principal != null && principal.getVaiTro() == VaiTroTaiKhoan.NGUOI_DUNG
-                ? principal.getTaiKhoanId()
-                : null;
-        DongChiTiet dong = docKho(() -> chiTietTinRepository.docChiTiet(tinId, nguoiXemId))
-                .orElseThrow(ListingNotFoundException::new);
-
-        DonViGiaTin donViGia = DonViGiaTin.tuGiaTri(dong.donViGia())
-                .orElseThrow(() -> new IllegalStateException("Đơn vị giá không hợp lệ: " + dong.donViGia()));
-        PriceConverter.KetQuaQuyDoiGia quyDoi = PriceConverter.quyDoi(
-                dong.giaGoc(), TimKiemTinService.chuyenDonVi(donViGia), dong.dienTichM2());
-        List<AnhChiTietItem> anh = dong.anh().stream()
-                .map(a -> new AnhChiTietItem(a.thuTu(), a.khoaAnhHienThi()))
-                .toList();
-        return new ChiTietTinResponse(
-                dong.tinId(),
-                dong.tieuDe(),
-                dong.moTa(),
-                dong.loaiGiaoDich(),
-                dong.loaiBds(),
-                dong.giaGoc(),
-                dong.donViGia(),
-                quyDoi.giaTongChuanVnd(),
-                quyDoi.giaM2ChuanVnd(),
-                dong.dienTichM2(),
-                dong.diaChi(),
-                dong.khuVuc(),
-                dong.viDo(),
-                dong.kinhDo(),
-                dong.ngayDang(),
-                anh,
-                nguoiXemId == null ? null : dong.daLuu(),
-                dong.laTaiTro()
-        );
-    }
-
-    public LienHeChuTinResponse lienHe(String rawSessionCookie, String listingId) {
+    public TinCongKhai xem(String rawSessionCookie, String listingId) {
         permissionAndCsrfService.kiemTraQuyenThaoTac(
                 rawSessionCookie, ThaoTacNghiepVu.XEM_CHI_TIET_TIN_DA_DUYET, null, null);
         UUID tinId = docTinId(listingId);
-        DongLienHe dong = docKho(() -> chiTietTinRepository.docLienHe(tinId))
-                .orElseThrow(ListingNotFoundException::new);
-        return new LienHeChuTinResponse(dong.hoTen(), dong.soDienThoai());
+        Optional<DongChiTiet> doc;
+        try {
+            doc = chiTietTinRepository.docChiTiet(tinId);
+        } catch (RuntimeException ex) {
+            throw new AuthProviderUnavailableException(THONG_DIEP_GIAN_DOAN, ex);
+        }
+        DongChiTiet d = doc.orElseThrow(ListingNotFoundException::new);
+        // Đường đọc chi tiết mặc định chế độ giá tong.
+        QuyDoiGiaTimKiem quyDoi = QuyDoiGiaTimKiem.tu(d.donViGia(), KieuGia.TONG, d.giaGoc(), d.dienTichM2());
+        PhienBanNoiDung noiDung = new PhienBanNoiDung(
+                d.phienBanId(),
+                d.soPhienBan(),
+                d.tieuDe(),
+                d.moTa(),
+                d.loaiGiaoDich(),
+                d.loaiBds(),
+                d.giaGoc().toPlainString(),
+                d.donViGia(),
+                d.dienTichM2().toPlainString(),
+                d.diaChi(),
+                d.khuVuc(),
+                d.viDo().toPlainString(),
+                d.kinhDo().toPlainString(),
+                d.anh().stream().map(a -> AnhHienThi.tu(a.id(), a.thuTu())).toList(),
+                d.taoLuc(),
+                new GiaQuyDoiHienThi(
+                        quyDoi.hienThi().toPlainString(),
+                        QuyDoiGiaTimKiem.donViHienThi(d.loaiGiaoDich(), KieuGia.TONG),
+                        GiaQuyDoiHienThi.CHU_THICH
+                )
+        );
+        return new TinCongKhai(d.tinId(), "da_duyet", d.ngayDang(), noiDung, new LienHeChuTin(d.hoTen(), d.soDienThoai()));
     }
 
     private static UUID docTinId(String listingId) {
@@ -99,13 +85,5 @@ public class ChiTietTinService {
             throw new ListingNotFoundException();
         }
         return UUID.fromString(listingId);
-    }
-
-    private static <T> Optional<T> docKho(Supplier<Optional<T>> viec) {
-        try {
-            return viec.get();
-        } catch (RuntimeException ex) {
-            throw new AuthProviderUnavailableException(THONG_DIEP_GIAN_DOAN, ex);
-        }
     }
 }

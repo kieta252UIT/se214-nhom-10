@@ -1,9 +1,8 @@
 package com.realestates.backend.search.infrastructure;
 
 import com.realestates.backend.search.domain.BoLocTimKiem;
-import com.realestates.backend.search.domain.ConTroTimKiem;
-import com.realestates.backend.search.domain.SapXepTin;
 import com.realestates.backend.search.domain.TimKiemRepository;
+import java.time.Instant;
 import java.util.List;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Repository;
@@ -14,18 +13,7 @@ import org.springframework.stereotype.Repository;
 public class InMemoryTimKiemRepository implements TimKiemRepository {
 
     @Override
-    public List<DongTin> docTaiTro(BoLocTimKiem boLoc, int toiDa) {
-        return List.of();
-    }
-
-    @Override
-    public List<DongTin> docTuNhien(
-            BoLocTimKiem boLoc,
-            SapXepTin sapXep,
-            ConTroTimKiem sau,
-            int toiDaTaiTro,
-            int gioiHan
-    ) {
-        return List.of();
+    public KetQua timKiem(BoLocTimKiem boLoc, int soTaiTroToiDa) {
+        return new KetQua(List.of(), 0, List.of(), Instant.now());
     }
 }

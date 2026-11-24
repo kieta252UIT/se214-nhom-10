@@ -15,14 +15,10 @@ import com.realestates.backend.auth.exception.UnauthenticatedSessionException;
 import com.realestates.backend.database.TestDatabaseSettings;
 import com.realestates.backend.detail.application.ChiTietTinService;
 import com.realestates.backend.detail.domain.ChiTietTinRepository;
-import com.realestates.backend.detail.dto.ChiTietTinResponse;
-import com.realestates.backend.detail.dto.LienHeChuTinResponse;
+import com.realestates.backend.detail.dto.TinCongKhai;
 import com.realestates.backend.detail.infrastructure.PostgreSqlChiTietTinRepository;
-import com.realestates.backend.domain.model.PriceConverter;
 import com.realestates.backend.favorite.application.YeuThichService;
 import com.realestates.backend.favorite.domain.YeuThichRepository;
-import com.realestates.backend.favorite.dto.DanhSachYeuThichResponse;
-import com.realestates.backend.favorite.dto.YeuThichItem;
 import com.realestates.backend.favorite.infrastructure.PostgreSqlYeuThichRepository;
 import com.realestates.backend.listing.application.QuanLyTinService;
 import com.realestates.backend.listing.application.TinDangService;
@@ -33,19 +29,16 @@ import com.realestates.backend.search.TimKiemPgTestSupport.NoiDung;
 import com.realestates.backend.search.TimKiemPgTestSupport.TaiKhoanSession;
 import com.realestates.backend.search.TimKiemPgTestSupport.TinTao;
 import com.realestates.backend.search.application.TimKiemTinService;
-import com.realestates.backend.search.dto.KetQuaTimKiemResponse;
-import com.realestates.backend.search.dto.ThamSoTimKiem;
-import com.realestates.backend.search.dto.TinTimKiemItem;
-import java.lang.reflect.RecordComponent;
-import java.math.BigDecimal;
+import com.realestates.backend.search.dto.AnhHienThi;
+import com.realestates.backend.search.dto.TinTomTat;
+import com.realestates.backend.search.dto.TrangTinCongKhai;
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Comparator;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.UUID;
 import org.assertj.core.api.ThrowableAssert.ThrowingCallable;
 import org.junit.jupiter.api.AfterEach;
@@ -58,7 +51,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ContextConfiguration;
 import org.springframework.transaction.PlatformTransactionManager;
 
-/** Chi tiết tin, liên hệ chủ tin và yêu thích trên PostgreSQL thật; dựng dữ liệu bằng luồng thật qua TimKiemPgTestSupport. */
+/** Chi tiết tin (kèm liên hệ) và yêu thích trên PostgreSQL thật; dựng dữ liệu bằng luồng thật qua TimKiemPgTestSupport. */
 @SpringBootTest(properties = "app.repository.type=postgres")
 @ContextConfiguration(initializers = TestDatabaseSettings.SpringInitializer.class)
 class PostgreSqlChiTietYeuThichTests {
@@ -117,8 +110,8 @@ class PostgreSqlChiTietYeuThichTests {
         return ht.taoTinDaDuyet(NoiDung.banMau(kv), GOC);
     }
 
-    private ChiTietTinResponse chiTiet(String cookie, TinTao tin) {
-        return chiTietTinService.chiTiet(cookie, tin.tinId().toString());
+    private TinCongKhai chiTiet(String cookie, TinTao tin) {
+        return chiTietTinService.xem(cookie, tin.tinId().toString());
     }
 
     private static void phaiLaKhongTimThay(ThrowingCallable viec) {
@@ -133,12 +126,12 @@ class PostgreSqlChiTietYeuThichTests {
         yeuThichService.bo(nguoi.rawCookie(), tin.tinId().toString());
     }
 
-    private DanhSachYeuThichResponse danhSach(TaiKhoanSession nguoi, String cursor, String limit) {
-        return yeuThichService.danhSach(nguoi.rawCookie(), cursor, limit);
+    private TrangTinCongKhai danhSach(TaiKhoanSession nguoi, String trang, String kichThuoc) {
+        return yeuThichService.danhSach(nguoi.rawCookie(), trang, kichThuoc);
     }
 
-    private static List<UUID> ids(List<YeuThichItem> items) {
-        return items.stream().map(YeuThichItem::tinId).toList();
+    private static List<UUID> ids(TrangTinCongKhai trang) {
+        return trang.noiDung().stream().map(TinTomTat::id).toList();
     }
 
     private static void kiemTraLoiTruong(ThrowingCallable viec, String truong) {
@@ -149,10 +142,10 @@ class PostgreSqlChiTietYeuThichTests {
                         .contains(truong));
     }
 
-    /** Dựng các tin không công khai: chờ duyệt, bị từ chối, đã xóa, bị gỡ. */
-    private record TinAn(TinTao choDuyet, TinTao biTuChoi, TinTao daXoa, TinTao biGo) {
+    /** Dựng các tin không công khai: chờ duyệt, bị từ chối, đã xóa, bị gỡ, chủ bị khóa. */
+    private record TinAn(TinTao choDuyet, TinTao biTuChoi, TinTao daXoa, TinTao biGo, TinTao chuBiKhoa) {
         List<TinTao> tatCa() {
-            return List.of(choDuyet, biTuChoi, daXoa, biGo);
+            return List.of(choDuyet, biTuChoi, daXoa, biGo, chuBiKhoa);
         }
     }
 
@@ -164,53 +157,43 @@ class PostgreSqlChiTietYeuThichTests {
         ht.xoaTin(daXoa);
         TinTao biGo = tinDaDuyet();
         ht.goViPham(biGo.tinId());
-        return new TinAn(choDuyet, biTuChoi, daXoa, biGo);
+        TinTao chuBiKhoa = tinDaDuyet();
+        ht.khoaChu(chuBiKhoa);
+        return new TinAn(choDuyet, biTuChoi, daXoa, biGo, chuBiKhoa);
     }
 
     // ------------------------------------------------------------------ chi tiết
 
     @Test
-    @DisplayName("Chi tiết tin công khai trả đủ trường, giá quy đổi đúng, ảnh phiên bản đã duyệt")
+    @DisplayName("Chi tiết tin công khai: TinCongKhai đủ trường, giá quy đổi tong, ảnh AnhHienThi, liên hệ chủ tin")
     void chiTietDayDu() {
         NoiDung noiDung = NoiDung.banMau(kv).voiBan("can_ho", "30000000", "vnd_m2", "50");
         TinTao tin = ht.taoTinDaDuyet(noiDung, GOC);
+        ht.datHoTenVaSoDienThoai(tin.chu().taiKhoan().getId(), "Nguyễn Văn Chủ", "0912345678");
 
-        ChiTietTinResponse kq = chiTiet(null, tin);
+        TinCongKhai kq = chiTiet(null, tin);
 
-        assertThat(kq.tinId()).isEqualTo(tin.tinId());
-        assertThat(kq.tieuDe()).isEqualTo("Căn hộ 2 phòng ngủ view sông");
-        assertThat(kq.moTa()).isEqualTo("Kết cấu 1 trệt 3 lầu, đường rộng 8m.");
-        assertThat(kq.loaiGiaoDich()).isEqualTo("ban");
-        assertThat(kq.loaiBds()).isEqualTo("can_ho");
-        assertThat(kq.giaGoc()).isEqualByComparingTo("30000000");
-        assertThat(kq.donViGia()).isEqualTo("vnd_m2");
-        assertThat(kq.giaTongChuanVnd()).isEqualByComparingTo("1500000000.00");
-        assertThat(kq.giaM2ChuanVnd()).isEqualByComparingTo("30000000.00");
-        assertThat(kq.dienTichM2()).isEqualByComparingTo("50");
-        assertThat(kq.diaChi()).isEqualTo("18 Lý Tự Trọng, Quận 1");
-        assertThat(kq.khuVuc()).isEqualTo(kv);
-        assertThat(kq.viDo()).isEqualByComparingTo("10.7772");
-        assertThat(kq.kinhDo()).isEqualByComparingTo("106.7015");
+        assertThat(kq.id()).isEqualTo(tin.tinId());
+        assertThat(kq.trangThai()).isEqualTo("da_duyet");
         assertThat(kq.ngayDang()).isEqualTo(GOC);
-        assertThat(kq.anh()).hasSize(1);
-        assertThat(kq.anh().get(0).thuTu()).isEqualTo(1);
-        assertThat(kq.anh().get(0).khoaAnhHienThi()).isEqualTo(ht.khoaAnhHienThi(tin.phienBanId()));
-        assertThat(kq.daLuu()).isNull();
-        assertThat(kq.laTaiTro()).isFalse();
-    }
-
-    @Test
-    @DisplayName("Giá thuê theo năm được quy đổi giống PriceConverter")
-    void chiTietGiaThue() {
-        NoiDung noiDung = NoiDung.banMau(kv).voiThue("nha_rieng", "120000000", "vnd_nam", "37.5");
-        TinTao tin = ht.taoTinDaDuyet(noiDung, GOC);
-
-        ChiTietTinResponse kq = chiTiet(null, tin);
-
-        PriceConverter.KetQuaQuyDoiGia mong = PriceConverter.quyDoi(
-                new BigDecimal("120000000"), PriceConverter.DonViGia.VND_NAM, new BigDecimal("37.5"));
-        assertThat(kq.giaTongChuanVnd()).isEqualByComparingTo(mong.giaTongChuanVnd());
-        assertThat(kq.giaM2ChuanVnd()).isEqualByComparingTo(mong.giaM2ChuanVnd());
+        assertThat(kq.noiDung().id()).isEqualTo(tin.phienBanId());
+        assertThat(kq.noiDung().tieuDe()).isEqualTo("Căn hộ 2 phòng ngủ view sông");
+        assertThat(kq.noiDung().moTa()).isEqualTo("Kết cấu 1 trệt 3 lầu, đường rộng 8m.");
+        assertThat(kq.noiDung().loaiGiaoDich()).isEqualTo("ban");
+        assertThat(kq.noiDung().loaiBds()).isEqualTo("can_ho");
+        assertThat(kq.noiDung().giaGoc()).isEqualTo("30000000");
+        assertThat(kq.noiDung().donViGia()).isEqualTo("vnd_m2");
+        assertThat(kq.noiDung().dienTichM2()).isEqualTo("50");
+        assertThat(kq.noiDung().diaChi()).isEqualTo("18 Lý Tự Trọng, Quận 1");
+        assertThat(kq.noiDung().khuVuc()).isEqualTo(kv);
+        assertThat(kq.noiDung().viDo()).isEqualTo("10.7772");
+        assertThat(kq.noiDung().kinhDo()).isEqualTo("106.7015");
+        assertThat(kq.noiDung().giaQuyDoiHienThi().giaTri()).isEqualTo("1500000000.00");
+        assertThat(kq.noiDung().giaQuyDoiHienThi().donVi()).isEqualTo("vnd_tong");
+        assertThat(kq.noiDung().anh()).containsExactly(AnhHienThi.tu(tin.anhId(), 1));
+        assertThat(kq.lienHe().hoTen()).isEqualTo("Nguyễn Văn Chủ");
+        assertThat(kq.lienHe().soDienThoai()).isEqualTo("0912345678");
+        assertThat(kq.toString()).doesNotContain(ht.emailTaiKhoan(tin.chu().taiKhoan().getId()));
     }
 
     @Test
@@ -221,100 +204,16 @@ class PostgreSqlChiTietYeuThichTests {
         ht.duyetPhienBanHienTai(tin.tinId());
 
         List<Map<String, Object>> mong = jdbcTemplate.queryForList(
-                "SELECT thu_tu, khoa_anh_hien_thi FROM se214.anh_tin WHERE phien_ban_tin_id = ? "
-                        + "AND trang_thai = 'da_gan' ORDER BY thu_tu",
+                "SELECT id, thu_tu FROM se214.anh_tin WHERE phien_ban_tin_id = ? AND trang_thai = 'da_gan' ORDER BY thu_tu",
                 tin.phienBanId()
         );
-        ChiTietTinResponse kq = chiTiet(null, tin);
+        List<AnhHienThi> anh = chiTiet(null, tin).noiDung().anh();
 
         assertThat(mong).hasSize(3);
-        assertThat(kq.anh()).hasSize(3);
-        for (int i = 0; i < 3; i++) {
-            assertThat(kq.anh().get(i).thuTu()).isEqualTo(((Number) mong.get(i).get("thu_tu")).intValue());
-            assertThat(kq.anh().get(i).khoaAnhHienThi()).isEqualTo(mong.get(i).get("khoa_anh_hien_thi"));
-        }
-        assertThat(kq.anh()).extracting(a -> a.thuTu()).containsExactly(1, 2, 3);
-    }
-
-    @Test
-    @DisplayName("Tin chờ duyệt, bị từ chối, đã xóa, bị gỡ, id ngẫu nhiên hoặc sai định dạng đều 404")
-    void chiTietKhongCongKhai() {
-        TinAn an = dungTinAn();
-        for (TinTao tin : an.tatCa()) {
-            phaiLaKhongTimThay(() -> chiTiet(null, tin));
-        }
-        phaiLaKhongTimThay(() -> chiTietTinService.chiTiet(null, UUID.randomUUID().toString()));
-        phaiLaKhongTimThay(() -> chiTietTinService.chiTiet(null, "khong-phai-uuid"));
-        phaiLaKhongTimThay(() -> chiTietTinService.chiTiet(null, "1-1-1-1-1"));
-    }
-
-    @Test
-    @DisplayName("Tin có bản sửa chờ duyệt vẫn hiện nội dung cũ; duyệt bản sửa thì hiện nội dung mới")
-    void chiTietBanSuaChoDuyet() {
-        TinTao tin = tinDaDuyet();
-        ht.suaTin(tin, NoiDung.banMau(kv).voiTieuDe("Tiêu đề mới chờ duyệt"));
-
-        assertThat(chiTiet(null, tin).tieuDe()).isEqualTo("Căn hộ 2 phòng ngủ view sông");
-
-        ht.duyetPhienBanHienTai(tin.tinId());
-        assertThat(chiTiet(null, tin).tieuDe()).isEqualTo("Tiêu đề mới chờ duyệt");
-    }
-
-    @Test
-    @DisplayName("daLuu: true/false cho người dùng đã đăng nhập, null cho khách, cookie rác và vai trò khác")
-    void chiTietDaLuu() {
-        TinTao tin = tinDaDuyet();
-        TaiKhoanSession daLuu = ht.taoTaiKhoan(VaiTroTaiKhoan.NGUOI_DUNG);
-        TaiKhoanSession chuaLuu = ht.taoTaiKhoan(VaiTroTaiKhoan.NGUOI_DUNG);
-        TaiKhoanSession kiemDuyet = ht.taoTaiKhoan(VaiTroTaiKhoan.KIEM_DUYET_VIEN);
-        TaiKhoanSession quanTri = ht.taoTaiKhoan(VaiTroTaiKhoan.QUAN_TRI_VIEN);
-        luu(daLuu, tin);
-
-        assertThat(chiTiet(daLuu.rawCookie(), tin).daLuu()).isTrue();
-        assertThat(chiTiet(chuaLuu.rawCookie(), tin).daLuu()).isFalse();
-        assertThat(chiTiet(null, tin).daLuu()).isNull();
-        assertThat(chiTiet("cookie-rac-khong-ton-tai", tin).daLuu()).isNull();
-        assertThat(chiTiet(kiemDuyet.rawCookie(), tin).daLuu()).isNull();
-        assertThat(chiTiet(quanTri.rawCookie(), tin).daLuu()).isNull();
-    }
-
-    @Test
-    @DisplayName("laTaiTro true khi có gói đang hoạt động còn hạn, false khi gói hết hạn")
-    void chiTietTaiTro() {
-        TinTao taiTro = tinDaDuyet();
-        TinTao hetHan = tinDaDuyet();
-        ht.taoGoiDangHoatDong(taiTro.tinId());
-        ht.taoGoi(hetHan.tinId(), "het_han", Instant.now().minusSeconds(60), "0 seconds");
-
-        assertThat(chiTiet(null, taiTro).laTaiTro()).isTrue();
-        assertThat(chiTiet(null, hetHan).laTaiTro()).isFalse();
-    }
-
-    @Test
-    @DisplayName("Phản hồi chi tiết và liên hệ không có chuId hay email")
-    void khongLoChuHayEmail() {
-        Set<String> chiTietTruong = new HashSet<>();
-        for (RecordComponent c : ChiTietTinResponse.class.getRecordComponents()) {
-            chiTietTruong.add(c.getName().toLowerCase());
-        }
-        assertThat(chiTietTruong).noneMatch(t -> t.contains("chu") && t.contains("id") || t.contains("email"));
-        assertThat(Arrays.stream(LienHeChuTinResponse.class.getRecordComponents()).map(RecordComponent::getName))
-                .containsExactly("hoTen", "soDienThoai");
-    }
-
-    // ------------------------------------------------------------------ liên hệ
-
-    @Test
-    @DisplayName("Liên hệ trả họ tên và số điện thoại của chủ tin, không có email")
-    void lienHeCoDuLieu() {
-        TinTao tin = tinDaDuyet();
-        ht.datHoTenVaSoDienThoai(tin.chu().taiKhoan().getId(), "Nguyễn Văn Chủ", "0912345678");
-
-        LienHeChuTinResponse kq = chiTietTinService.lienHe(null, tin.tinId().toString());
-
-        assertThat(kq.hoTen()).isEqualTo("Nguyễn Văn Chủ");
-        assertThat(kq.soDienThoai()).isEqualTo("0912345678");
-        assertThat(kq.toString()).doesNotContain(ht.emailTaiKhoan(tin.chu().taiKhoan().getId()));
+        assertThat(anh).containsExactlyElementsOf(mong.stream()
+                .map(d -> AnhHienThi.tu((UUID) d.get("id"), ((Number) d.get("thu_tu")).intValue()))
+                .toList());
+        assertThat(anh).extracting(AnhHienThi::thuTu).containsExactly(1, 2, 3);
     }
 
     @Test
@@ -323,38 +222,34 @@ class PostgreSqlChiTietYeuThichTests {
         TinTao tin = tinDaDuyet();
         ht.datHoTenVaSoDienThoai(tin.chu().taiKhoan().getId(), null, null);
 
-        LienHeChuTinResponse kq = chiTietTinService.lienHe(null, tin.tinId().toString());
+        TinCongKhai kq = chiTiet(null, tin);
 
-        assertThat(kq.hoTen()).isNull();
-        assertThat(kq.soDienThoai()).isNull();
+        assertThat(kq.lienHe().hoTen()).isNull();
+        assertThat(kq.lienHe().soDienThoai()).isNull();
     }
 
     @Test
-    @DisplayName("Chủ tin bị khóa: liên hệ 404 nhưng chi tiết và tìm kiếm vẫn thấy tin")
-    void lienHeChuBiKhoa() {
-        TinTao tin = tinDaDuyet();
-        ht.khoaTaiKhoan(tin.chu().taiKhoan().getId());
-
-        phaiLaKhongTimThay(() -> docLienHe(tin));
-        assertThat(chiTiet(null, tin).tinId()).isEqualTo(tin.tinId());
-        KetQuaTimKiemResponse timKiem = timKiemTinService.timKiem(
-                null, new ThamSoTimKiem(null, null, kv, null, null, null, null, null, null, null, "50"));
-        assertThat(timKiem.tuNhien()).extracting(TinTimKiemItem::tinId).contains(tin.tinId());
-    }
-
-    private LienHeChuTinResponse docLienHe(TinTao tin) {
-        return chiTietTinService.lienHe(null, tin.tinId().toString());
-    }
-
-    @Test
-    @DisplayName("Liên hệ của tin không công khai, id ngẫu nhiên hoặc sai định dạng đều 404")
-    void lienHeKhongCongKhai() {
+    @DisplayName("BR-01: chờ duyệt, bị từ chối, đã xóa, bị gỡ, chủ bị khóa, id ngẫu nhiên hoặc sai định dạng đều 404")
+    void chiTietKhongCongKhai() {
         TinAn an = dungTinAn();
         for (TinTao tin : an.tatCa()) {
-            phaiLaKhongTimThay(() -> docLienHe(tin));
+            phaiLaKhongTimThay(() -> chiTiet(null, tin));
         }
-        phaiLaKhongTimThay(() -> chiTietTinService.lienHe(null, UUID.randomUUID().toString()));
-        phaiLaKhongTimThay(() -> chiTietTinService.lienHe(null, "xyz"));
+        phaiLaKhongTimThay(() -> chiTietTinService.xem(null, UUID.randomUUID().toString()));
+        phaiLaKhongTimThay(() -> chiTietTinService.xem(null, "khong-phai-uuid"));
+        phaiLaKhongTimThay(() -> chiTietTinService.xem(null, "1-1-1-1-1"));
+    }
+
+    @Test
+    @DisplayName("BR-01: tin sửa chờ duyệt (trạng thái cho_duyet) là 404; duyệt bản sửa thì hiện nội dung mới")
+    void chiTietBanSuaChoDuyet() {
+        TinTao tin = tinDaDuyet();
+        ht.suaTin(tin, NoiDung.banMau(kv).voiTieuDe("Tiêu đề mới chờ duyệt"));
+
+        phaiLaKhongTimThay(() -> chiTiet(null, tin));
+
+        ht.duyetPhienBanHienTai(tin.tinId());
+        assertThat(chiTiet(null, tin).noiDung().tieuDe()).isEqualTo("Tiêu đề mới chờ duyệt");
     }
 
     // ------------------------------------------------------------------ yêu thích: lưu / bỏ
@@ -375,7 +270,7 @@ class PostgreSqlChiTietYeuThichTests {
     }
 
     @Test
-    @DisplayName("Lưu tin không công khai, id ngẫu nhiên hoặc sai định dạng: 404 và không có dòng nào")
+    @DisplayName("Lưu tin không công khai (kể cả chủ bị khóa), id ngẫu nhiên hoặc sai định dạng: 404 và không có dòng nào")
     void luuTinKhongCongKhai() {
         TinAn an = dungTinAn();
         TaiKhoanSession nguoi = ht.taoTaiKhoan(VaiTroTaiKhoan.NGUOI_DUNG);
@@ -389,7 +284,7 @@ class PostgreSqlChiTietYeuThichTests {
     }
 
     @Test
-    @DisplayName("Đã lưu rồi tin bị ẩn: PUT vẫn thành công (idempotent), không đổi luu_luc")
+    @DisplayName("Đã lưu rồi tin bị ẩn: PUT lại trả 404, dòng cũ và luu_luc giữ nguyên")
     void luuLaiTinDaAn() {
         TinTao tin = tinDaDuyet();
         TaiKhoanSession nguoi = ht.taoTaiKhoan(VaiTroTaiKhoan.NGUOI_DUNG);
@@ -397,13 +292,13 @@ class PostgreSqlChiTietYeuThichTests {
         Instant luuLuc = ht.luuLucYeuThich(nguoi.taiKhoan().getId(), tin.tinId());
         ht.goViPham(tin.tinId());
 
-        assertThatCode(() -> luu(nguoi, tin)).doesNotThrowAnyException();
+        phaiLaKhongTimThay(() -> luu(nguoi, tin));
         assertThat(ht.demYeuThich(nguoi.taiKhoan().getId(), tin.tinId())).isEqualTo(1);
         assertThat(ht.luuLucYeuThich(nguoi.taiKhoan().getId(), tin.tinId())).isEqualTo(luuLuc);
     }
 
     @Test
-    @DisplayName("Bỏ yêu thích idempotent: bỏ hai lần, chưa từng lưu, tin ẩn/đã xóa, id ngẫu nhiên hoặc sai định dạng đều êm")
+    @DisplayName("Bỏ yêu thích idempotent: bỏ hai lần, chưa từng lưu, tin đã xóa, id ngẫu nhiên hoặc sai định dạng đều êm")
     void boYeuThich() {
         TinTao tin = tinDaDuyet();
         TinTao chuaLuu = tinDaDuyet();
@@ -441,67 +336,67 @@ class PostgreSqlChiTietYeuThichTests {
         }
     }
 
+    @Test
+    @DisplayName("Tài khoản bị khóa sau khi đăng nhập: PUT bị chặn khi kiểm lại quyền, không ghi dòng nào")
+    void luuKhiTaiKhoanBiKhoa() {
+        TinTao tin = tinDaDuyet();
+        TaiKhoanSession nguoi = ht.taoTaiKhoan(VaiTroTaiKhoan.NGUOI_DUNG);
+        ht.khoaTaiKhoan(nguoi.taiKhoan().getId());
+
+        assertThatThrownBy(() -> luu(nguoi, tin)).isNotInstanceOf(ListingNotFoundException.class);
+        assertThat(ht.demYeuThich(nguoi.taiKhoan().getId(), tin.tinId())).isZero();
+    }
+
     // ------------------------------------------------------------------ yêu thích: danh sách
 
     @Test
-    @DisplayName("Danh sách rỗng khi chưa lưu gì")
+    @DisplayName("Danh sách rỗng khi chưa lưu gì: trang 0, kichThuoc 20, tongSo 0")
     void danhSachRong() {
         TaiKhoanSession nguoi = ht.taoTaiKhoan(VaiTroTaiKhoan.NGUOI_DUNG);
 
-        DanhSachYeuThichResponse kq = danhSach(nguoi, null, null);
+        TrangTinCongKhai kq = danhSach(nguoi, null, null);
 
-        assertThat(kq.items()).isEmpty();
-        assertThat(kq.conTroTiepTheo()).isNull();
+        assertThat(kq.noiDung()).isEmpty();
+        assertThat(kq.trang()).isZero();
+        assertThat(kq.kichThuoc()).isEqualTo(20);
+        assertThat(kq.tongSo()).isZero();
     }
 
     @Test
-    @DisplayName("Phân trang keyset với nhiều luu_luc bằng nhau: ổn định, không trùng, không sót, mới lưu trước")
+    @DisplayName("Phân trang OFFSET với nhiều luu_luc bằng nhau: luu_luc DESC rồi tin_id ASC, không trùng, không sót")
     void danhSachPhanTrangLuuLucBangNhau() {
         TaiKhoanSession nguoi = ht.taoTaiKhoan(VaiTroTaiKhoan.NGUOI_DUNG);
         List<TinTao> tins = new ArrayList<>();
         for (int i = 0; i < 9; i++) {
             tins.add(tinDaDuyet());
         }
-        // 3 nhóm, mỗi nhóm 3 tin cùng luu_luc (cùng micro giây).
+        // 3 nhóm, mỗi nhóm 3 tin cùng luu_luc.
         for (int i = 0; i < tins.size(); i++) {
             ht.chenYeuThich(nguoi.taiKhoan().getId(), tins.get(i).tinId(), GOC.plusSeconds(60L * (i / 3)));
         }
+        // PostgreSQL so sánh uuid theo chuỗi hex, không theo UUID.compareTo của Java.
         List<UUID> mong = tins.stream()
                 .sorted(Comparator
                         .comparing((TinTao t) -> ht.luuLucYeuThich(nguoi.taiKhoan().getId(), t.tinId()))
-                        .thenComparing(t -> t.tinId().toString())
-                        .reversed())
+                        .reversed()
+                        .thenComparing(t -> t.tinId().toString()))
                 .map(TinTao::tinId)
                 .toList();
 
-        for (int limit : new int[] {1, 2, 4, 9, 50}) {
+        for (int kichThuoc : new int[] {1, 2, 4, 9, 50}) {
             List<UUID> nhanDuoc = new ArrayList<>();
-            String cursor = null;
-            int baoVe = 0;
-            do {
-                DanhSachYeuThichResponse trang = danhSach(nguoi, cursor, String.valueOf(limit));
-                assertThat(trang.items().size()).isLessThanOrEqualTo(limit);
-                nhanDuoc.addAll(ids(trang.items()));
-                cursor = trang.conTroTiepTheo();
-                baoVe++;
-            } while (cursor != null && baoVe < 50);
-            assertThat(nhanDuoc).as("limit=%d", limit).containsExactlyElementsOf(mong);
+            for (int trang = 0; trang * kichThuoc < 9; trang++) {
+                TrangTinCongKhai kq = danhSach(nguoi, String.valueOf(trang), String.valueOf(kichThuoc));
+                assertThat(kq.tongSo()).isEqualTo(9);
+                assertThat(kq.noiDung().size()).isLessThanOrEqualTo(kichThuoc);
+                nhanDuoc.addAll(ids(kq));
+            }
+            assertThat(nhanDuoc).as("kichThuoc=%d", kichThuoc).containsExactlyElementsOf(mong);
             assertThat(new HashSet<>(nhanDuoc)).hasSameSizeAs(nhanDuoc);
         }
-        assertThat(danhSach(nguoi, null, "9").conTroTiepTheo()).isNull();
-        assertThat(danhSach(nguoi, null, "8").conTroTiepTheo()).isNotNull();
-    }
-
-    @Test
-    @DisplayName("Mới lưu hiện trước (luu_luc giảm dần)")
-    void danhSachMoiLuuTruoc() {
-        TaiKhoanSession nguoi = ht.taoTaiKhoan(VaiTroTaiKhoan.NGUOI_DUNG);
-        TinTao cu = tinDaDuyet();
-        TinTao moi = tinDaDuyet();
-        ht.chenYeuThich(nguoi.taiKhoan().getId(), cu.tinId(), GOC);
-        ht.chenYeuThich(nguoi.taiKhoan().getId(), moi.tinId(), GOC.plusSeconds(5));
-
-        assertThat(ids(danhSach(nguoi, null, null).items())).containsExactly(moi.tinId(), cu.tinId());
+        TrangTinCongKhai quaCuoi = danhSach(nguoi, "5", "2");
+        assertThat(quaCuoi.noiDung()).isEmpty();
+        assertThat(quaCuoi.tongSo()).isEqualTo(9);
     }
 
     @Test
@@ -517,50 +412,46 @@ class PostgreSqlChiTietYeuThichTests {
         luu(b, tinB);
         luu(b, chung);
 
-        assertThat(ids(danhSach(a, null, null).items())).containsExactlyInAnyOrder(tinA.tinId(), chung.tinId());
-        assertThat(ids(danhSach(b, null, null).items())).containsExactlyInAnyOrder(tinB.tinId(), chung.tinId());
+        assertThat(ids(danhSach(a, null, null))).containsExactlyInAnyOrder(tinA.tinId(), chung.tinId());
+        assertThat(ids(danhSach(b, null, null))).containsExactlyInAnyOrder(tinB.tinId(), chung.tinId());
         bo(a, chung);
-        assertThat(ids(danhSach(b, null, null).items())).contains(chung.tinId());
-        assertThat(ids(danhSach(a, null, null).items())).containsExactly(tinA.tinId());
+        assertThat(ids(danhSach(b, null, null))).contains(chung.tinId());
+        assertThat(ids(danhSach(a, null, null))).containsExactly(tinA.tinId());
     }
 
     @Test
-    @DisplayName("Mục công khai có tin giống kết quả tìm kiếm; tin tài trợ có laTaiTro true")
+    @DisplayName("Mục yêu thích là TinTomTat giống hệt kết quả tìm kiếm (cheDoGia tong)")
     void danhSachTinGiongTimKiem() {
         TaiKhoanSession nguoi = ht.taoTaiKhoan(VaiTroTaiKhoan.NGUOI_DUNG);
-        TinTao thuong = ht.taoTinDaDuyet(NoiDung.banMau(kv).voiGia("2500000000").voiDienTich("68.5"), GOC);
-        TinTao taiTro = tinDaDuyet();
-        ht.taoGoiDangHoatDong(taiTro.tinId());
-        luu(nguoi, thuong);
-        luu(nguoi, taiTro);
+        TinTao tin = ht.taoTinDaDuyet(NoiDung.banMau(kv).voiGia("2500000000").voiDienTich("68.5"), GOC);
+        luu(nguoi, tin);
 
-        List<YeuThichItem> items = danhSach(nguoi, null, null).items();
-        KetQuaTimKiemResponse timKiem = timKiemTinService.timKiem(
-                null, new ThamSoTimKiem(null, null, kv, null, null, null, null, null, null, null, "50"));
-        TinTimKiemItem timThuong = timKiem.tuNhien().stream()
-                .filter(t -> t.tinId().equals(thuong.tinId())).findFirst().orElseThrow();
+        TinTomTat muc = danhSach(nguoi, null, null).noiDung().get(0);
+        Map<String, String[]> thamSo = new LinkedHashMap<>();
+        thamSo.put("khuVuc", new String[] {kv});
+        TinTomTat timThay = timKiemTinService.timKiem(null, thamSo).tuNhien().noiDung().stream()
+                .filter(t -> t.id().equals(tin.tinId())).findFirst().orElseThrow();
 
-        YeuThichItem muc = items.stream().filter(i -> i.tinId().equals(thuong.tinId())).findFirst().orElseThrow();
-        assertThat(muc.conHienThi()).isTrue();
-        assertThat(muc.luuLuc()).isNotNull();
-        assertThat(muc.tin()).isEqualTo(timThuong);
-        assertThat(muc.tin().anhDaiDien()).isEqualTo(ht.khoaAnhHienThi(thuong.phienBanId())).isNotBlank();
-        YeuThichItem mucTaiTro = items.stream().filter(i -> i.tinId().equals(taiTro.tinId())).findFirst().orElseThrow();
-        assertThat(mucTaiTro.tin().laTaiTro()).isTrue();
+        assertThat(muc).isEqualTo(timThay);
+        assertThat(muc.anhDaiDien()).isEqualTo(AnhHienThi.tu(tin.anhId(), 1));
+        assertThat(muc.giaQuyDoiHienThi().donVi()).isEqualTo("vnd_tong");
     }
 
     @Test
-    @DisplayName("Tin bị ẩn sau khi lưu (xóa, gỡ, chưa duyệt, bị từ chối) vẫn có mục với conHienThi=false và tin=null")
-    void danhSachTinAnSauKhiLuu() {
+    @DisplayName("BR-01: tin bị ẩn sau khi lưu (xóa, gỡ, chủ khóa, chưa duyệt, bị từ chối) bị loại khỏi noiDung và tongSo")
+    void danhSachLoaiTinKhongCongKhai() {
         TaiKhoanSession nguoi = ht.taoTaiKhoan(VaiTroTaiKhoan.NGUOI_DUNG);
         TinTao conHien = tinDaDuyet();
         TinTao daXoa = tinDaDuyet();
         TinTao biGo = tinDaDuyet();
+        TinTao chuBiKhoa = tinDaDuyet();
         luu(nguoi, conHien);
         luu(nguoi, daXoa);
         luu(nguoi, biGo);
+        luu(nguoi, chuBiKhoa);
         ht.xoaTin(daXoa);
         ht.goViPham(biGo.tinId());
+        ht.khoaChu(chuBiKhoa);
         // Không thể lưu qua API: chèn thẳng để mô phỏng dữ liệu lệch (chưa duyệt / bị từ chối).
         TinTao choDuyet = ht.taoTinChoDuyet(NoiDung.banMau(kv));
         TinTao biTuChoi = ht.taoTinChoDuyet(NoiDung.banMau(kv));
@@ -568,47 +459,40 @@ class PostgreSqlChiTietYeuThichTests {
         ht.chenYeuThich(nguoi.taiKhoan().getId(), choDuyet.tinId(), GOC);
         ht.chenYeuThich(nguoi.taiKhoan().getId(), biTuChoi.tinId(), GOC);
 
-        List<YeuThichItem> items = danhSach(nguoi, null, "50").items();
+        TrangTinCongKhai kq = danhSach(nguoi, null, "50");
 
-        assertThat(items).hasSize(5);
-        for (YeuThichItem muc : items) {
-            if (muc.tinId().equals(conHien.tinId())) {
-                assertThat(muc.conHienThi()).isTrue();
-                assertThat(muc.tin()).isNotNull();
-            } else {
-                assertThat(muc.conHienThi()).as("tin %s", muc.tinId()).isFalse();
-                assertThat(muc.tin()).isNull();
-                assertThat(muc.luuLuc()).isNotNull();
-            }
-        }
-        // Người dùng vẫn bỏ lưu được các mục ẩn.
-        bo(nguoi, daXoa);
-        assertThat(ids(danhSach(nguoi, null, "50").items())).doesNotContain(daXoa.tinId());
+        assertThat(ids(kq)).containsExactly(conHien.tinId());
+        assertThat(kq.tongSo()).isEqualTo(1);
+        // Người dùng vẫn bỏ lưu được mục đã ẩn.
+        bo(nguoi, biGo);
+        assertThat(ht.demYeuThich(nguoi.taiKhoan().getId(), biGo.tinId())).isZero();
     }
 
     @Test
-    @DisplayName("Tin có bản sửa chờ duyệt vẫn hiện nội dung cũ trong danh sách yêu thích")
+    @DisplayName("Tin sửa chờ duyệt tạm rời danh sách yêu thích; duyệt xong quay lại với nội dung mới, giữ luu_luc")
     void danhSachBanSuaChoDuyet() {
         TaiKhoanSession nguoi = ht.taoTaiKhoan(VaiTroTaiKhoan.NGUOI_DUNG);
         TinTao tin = tinDaDuyet();
         luu(nguoi, tin);
         ht.suaTin(tin, NoiDung.banMau(kv).voiTieuDe("Tiêu đề mới chờ duyệt"));
 
-        YeuThichItem muc = danhSach(nguoi, null, null).items().get(0);
+        assertThat(danhSach(nguoi, null, null).tongSo()).isZero();
 
-        assertThat(muc.conHienThi()).isTrue();
-        assertThat(muc.tin().tieuDe()).isEqualTo("Căn hộ 2 phòng ngủ view sông");
+        ht.duyetPhienBanHienTai(tin.tinId());
+        assertThat(danhSach(nguoi, null, null).noiDung()).extracting(TinTomTat::tieuDe)
+                .containsExactly("Tiêu đề mới chờ duyệt");
     }
 
     @Test
-    @DisplayName("cursor hoặc limit không hợp lệ trả 400 theo trường")
+    @DisplayName("trang hoặc kichThuoc không hợp lệ trả 400 theo trường")
     void danhSachThamSoKhongHopLe() {
         TaiKhoanSession nguoi = ht.taoTaiKhoan(VaiTroTaiKhoan.NGUOI_DUNG);
 
-        kiemTraLoiTruong(() -> danhSach(nguoi, "rac-khong-giai-ma-duoc", null), "cursor");
-        kiemTraLoiTruong(() -> danhSach(nguoi, "eTF8MjAyNi0xMS0wMSAwMDowMDowMCswMHwxfGFiYw", null), "cursor");
-        for (String limit : new String[] {"0", "51", "-1", "abc", "1.5", "99999999999"}) {
-            kiemTraLoiTruong(() -> danhSach(nguoi, null, limit), "limit");
+        for (String trang : new String[] {"-1", "100001", "abc", "1.5", "01", "99999999999"}) {
+            kiemTraLoiTruong(() -> danhSach(nguoi, trang, null), "trang");
+        }
+        for (String kichThuoc : new String[] {"0", "51", "-1", "abc", "1.5", "99999999999"}) {
+            kiemTraLoiTruong(() -> danhSach(nguoi, null, kichThuoc), "kichThuoc");
         }
     }
 }

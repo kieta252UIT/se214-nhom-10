@@ -1,6 +1,5 @@
 package com.realestates.backend.favorite.infrastructure;
 
-import com.realestates.backend.favorite.domain.ConTroYeuThich;
 import com.realestates.backend.favorite.domain.YeuThichRepository;
 import java.util.List;
 import java.util.UUID;
@@ -23,7 +22,7 @@ public class InMemoryYeuThichRepository implements YeuThichRepository {
     }
 
     @Override
-    public List<DongYeuThich> docDanhSach(UUID taiKhoanId, ConTroYeuThich sau, int gioiHan) {
-        return List.of();
+    public TrangYeuThich docDanhSach(UUID taiKhoanId, long boQua, int gioiHan) {
+        return new TrangYeuThich(List.of(), 0);
     }
 }

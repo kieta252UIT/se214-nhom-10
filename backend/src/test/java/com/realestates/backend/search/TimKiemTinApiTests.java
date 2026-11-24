@@ -1,12 +1,12 @@
 package com.realestates.backend.search;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.hamcrest.Matchers.hasItem;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-import com.jayway.jsonpath.JsonPath;
 import com.realestates.backend.auth.application.CurrentPermissionAndCsrfService;
 import com.realestates.backend.auth.controller.CsrfAndOriginProtectionFilter;
 import com.realestates.backend.auth.domain.PhienXacThuc;
@@ -26,7 +26,6 @@ import com.realestates.backend.listing.exception.ListingExceptionHandler;
 import com.realestates.backend.search.application.TimKiemTinService;
 import com.realestates.backend.search.controller.TimKiemTinController;
 import com.realestates.backend.search.domain.BoLocTimKiem;
-import com.realestates.backend.search.domain.ConTroTimKiem;
 import com.realestates.backend.search.domain.KieuGia;
 import com.realestates.backend.search.domain.SapXepTin;
 import com.realestates.backend.search.domain.TimKiemRepository;
@@ -34,7 +33,6 @@ import jakarta.servlet.http.Cookie;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
@@ -47,7 +45,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
-/** API tìm kiếm qua MockMvc độc lập (không DB) với kho giả: khách được phép, gán tham số, lỗi 400 theo trường, header. */
+/** API tìm kiếm qua MockMvc độc lập (không DB) với kho giả: khách được phép, gán tham số, lỗi 400 theo trường, schema. */
 class TimKiemTinApiTests {
 
     private static final String ORIGIN = "https://localhost";
@@ -87,23 +85,48 @@ class TimKiemTinApiTests {
     }
 
     @Test
-    @DisplayName("Khách không cookie nhận 200, no-store, Vary Cookie; có khối taiTro và tuNhien")
-    void khachDuocPhep() throws Exception {
+    @DisplayName("Khách không cookie nhận 200, no-store, Vary Cookie; response đúng schema KetQuaTimKiem/TinTomTat")
+    void khachDuocPhepVaDungSchema() throws Exception {
+        String anhId = new UUID(2L, 1L).toString();
         mockMvc.perform(yeuCauGet("/api/listings", null))
                 .andExpect(status().isOk())
                 .andExpect(header().string(HttpHeaders.CACHE_CONTROL, "no-store"))
                 .andExpect(header().string(HttpHeaders.VARY, HttpHeaders.COOKIE))
+                .andExpect(jsonPath("$.thoiDiemTruyVan").exists())
+                .andExpect(jsonPath("$.tuNhien.trang").value(0))
+                .andExpect(jsonPath("$.tuNhien.kichThuoc").value(20))
+                .andExpect(jsonPath("$.tuNhien.tongSo").value(42))
+                .andExpect(jsonPath("$.tuNhien.noiDung.length()").value(1))
+                .andExpect(jsonPath("$.tuNhien.noiDung[0].id").value(new UUID(0L, 1L).toString()))
+                .andExpect(jsonPath("$.tuNhien.noiDung[0].phienBanId").value(new UUID(1L, 1L).toString()))
+                .andExpect(jsonPath("$.tuNhien.noiDung[0].giaGoc").value("100000000"))
+                .andExpect(jsonPath("$.tuNhien.noiDung[0].dienTichM2").value("3"))
+                .andExpect(jsonPath("$.tuNhien.noiDung[0].viDo").value("10.7772"))
+                .andExpect(jsonPath("$.tuNhien.noiDung[0].kinhDo").value("106.7015"))
+                .andExpect(jsonPath("$.tuNhien.noiDung[0].anhDaiDien.id").value(anhId))
+                .andExpect(jsonPath("$.tuNhien.noiDung[0].anhDaiDien.thuTu").value(1))
+                .andExpect(jsonPath("$.tuNhien.noiDung[0].anhDaiDien.duongDanDoc").value("/api/images/" + anhId + "/content"))
+                .andExpect(jsonPath("$.tuNhien.noiDung[0].anhDaiDien.khoaAnhHienThi").doesNotExist())
+                .andExpect(jsonPath("$.tuNhien.noiDung[0].giaQuyDoiHienThi.giaTri").value("100000000.00"))
+                .andExpect(jsonPath("$.tuNhien.noiDung[0].giaQuyDoiHienThi.donVi").value("vnd_tong"))
+                .andExpect(jsonPath("$.tuNhien.noiDung[0].giaQuyDoiHienThi.chuThich")
+                        .value("Giá quy đổi tham khảo; không dùng để lọc."))
                 .andExpect(jsonPath("$.taiTro.length()").value(1))
-                .andExpect(jsonPath("$.taiTro[0].laTaiTro").value(true))
-                .andExpect(jsonPath("$.tuNhien.length()").value(3))
-                .andExpect(jsonPath("$.tuNhien[0].laTaiTro").value(false))
-                .andExpect(jsonPath("$.tuNhien[0].giaTongChuanVnd").value(2500000000.0))
-                .andExpect(jsonPath("$.tuNhien[0].giaM2ChuanVnd").value(36496350.36))
-                .andExpect(jsonPath("$.tuNhien[0].anhDaiDien").value("anh/hien-thi-1.png"))
-                .andExpect(jsonPath("$.conTroTiepTheo").doesNotExist());
-        assertThat(khoGia.boLocCuoi.kieuGia()).isEqualTo(KieuGia.TONG);
-        assertThat(khoGia.sapXepCuoi).isEqualTo(SapXepTin.MOI_NHAT);
-        assertThat(khoGia.gioiHanCuoi).isEqualTo(TimKiemTinService.GIOI_HAN_MAC_DINH + 1);
+                .andExpect(jsonPath("$.taiTro[0].id").value(new UUID(0L, 9L).toString()));
+        assertThat(khoGia.boLocCuoi.cheDoGia()).isEqualTo(KieuGia.TONG);
+        assertThat(khoGia.boLocCuoi.sapXep()).isEqualTo(SapXepTin.MAC_DINH);
+        assertThat(khoGia.boLocCuoi.trang()).isZero();
+        assertThat(khoGia.boLocCuoi.kichThuoc()).isEqualTo(TimKiemTinService.KICH_THUOC_MAC_DINH);
+        assertThat(khoGia.soTaiTroCuoi).isEqualTo(TimKiemTinService.SO_TAI_TRO_TOI_DA);
+    }
+
+    @Test
+    @DisplayName("cheDoGia=m2 hiển thị giá/m2 làm tròn HALF_UP 2 chữ số")
+    void cheDoGiaM2() throws Exception {
+        mockMvc.perform(yeuCauGet("/api/listings?cheDoGia=m2", null))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.tuNhien.noiDung[0].giaQuyDoiHienThi.giaTri").value("33333333.33"))
+                .andExpect(jsonPath("$.tuNhien.noiDung[0].giaQuyDoiHienThi.donVi").value("vnd_m2"));
     }
 
     @Test
@@ -117,117 +140,111 @@ class TimKiemTinApiTests {
     }
 
     @Test
-    @DisplayName("Tham số query được gán đúng vào bộ lọc, sắp xếp và giới hạn (loaiBds lặp lại hoặc phân tách dấu phẩy)")
+    @DisplayName("Tham số hợp đồng được gán đúng: tuKhoa/khuVuc chuẩn hóa không dấu, giá, diện tích, vùng bản đồ, trang")
     void ganThamSo() throws Exception {
-        mockMvc.perform(yeuCauGet(
-                        "/api/listings?loaiGiaoDich=cho_thue&loaiBds=can_ho&loaiBds=dat,phong_tro&khuVuc= Quan 1 "
-                                + "&giaTu=1000000&giaDen=2500000.50&kieuGia=m2&dienTichTu=20&dienTichDen=80.5"
-                                + "&sapXep=gia_giam&limit=7",
-                        null))
-                .andExpect(status().isOk());
-        BoLocTimKiem boLoc = khoGia.boLocCuoi;
-        assertThat(boLoc.loaiGiaoDich()).isEqualTo(LoaiGiaoDich.CHO_THUE);
-        assertThat(boLoc.loaiBds()).containsExactly(LoaiBds.CAN_HO, LoaiBds.DAT, LoaiBds.PHONG_TRO);
-        assertThat(boLoc.khuVuc()).isEqualTo("Quan 1");
-        assertThat(boLoc.kieuGia()).isEqualTo(KieuGia.M2);
-        assertThat(boLoc.giaTu()).isEqualByComparingTo("1000000");
-        assertThat(boLoc.giaDen()).isEqualByComparingTo("2500000.50");
-        assertThat(boLoc.dienTichTu()).isEqualByComparingTo("20");
-        assertThat(boLoc.dienTichDen()).isEqualByComparingTo("80.5");
-        assertThat(khoGia.sapXepCuoi).isEqualTo(SapXepTin.GIA_GIAM);
-        assertThat(khoGia.gioiHanCuoi).isEqualTo(8);
-        assertThat(khoGia.soLanDocTaiTro).isEqualTo(1);
-    }
-
-    @Test
-    @DisplayName("Phân trang: có conTroTiepTheo khi còn dữ liệu; trang có cursor không gọi khối tài trợ và cursor mang đúng khóa")
-    void phanTrangVaCursor() throws Exception {
-        String trang1 = mockMvc.perform(yeuCauGet("/api/listings?limit=2", null))
+        mockMvc.perform(get("/api/listings")
+                        .param("tuKhoa", "  Căn Hộ Quận 1 căn ")
+                        .param("loaiGiaoDich", "cho_thue")
+                        .param("loaiBds", "phong_tro")
+                        .param("khuVuc", "Thủ Đức")
+                        .param("cheDoGia", "m2")
+                        .param("giaMin", "0")
+                        .param("giaMax", "200000.5")
+                        .param("dienTichMin", "10")
+                        .param("dienTichMax", "80")
+                        .param("nam", "10.5")
+                        .param("bac", "11")
+                        .param("tay", "106")
+                        .param("dong", "107.25")
+                        .param("sapXep", "moi_nhat")
+                        .param("trang", "3")
+                        .param("kichThuoc", "50"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.tuNhien.length()").value(2))
-                .andExpect(jsonPath("$.conTroTiepTheo").isNotEmpty())
-                .andReturn().getResponse().getContentAsString();
-        String conTro = JsonPath.read(trang1, "$.conTroTiepTheo");
-        ConTroTimKiem giaiMa = ConTroTimKiem.giaiMa(conTro).orElseThrow();
-        assertThat(giaiMa.sapXep()).isEqualTo(SapXepTin.MOI_NHAT);
-        assertThat(giaiMa.tinId()).isEqualTo(new UUID(0L, 2L));
-        assertThat(khoGia.soLanDocTaiTro).isEqualTo(1);
-
-        mockMvc.perform(yeuCauGet("/api/listings?limit=2&cursor=" + conTro, null))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.taiTro.length()").value(0));
-        assertThat(khoGia.soLanDocTaiTro).isEqualTo(1);
-        assertThat(khoGia.conTroCuoi).isNotNull();
-        assertThat(khoGia.conTroCuoi.tinId()).isEqualTo(new UUID(0L, 2L));
+                .andExpect(jsonPath("$.tuNhien.trang").value(3))
+                .andExpect(jsonPath("$.tuNhien.kichThuoc").value(50));
+        BoLocTimKiem b = khoGia.boLocCuoi;
+        assertThat(b.tuKhoa()).containsExactly("can", "ho", "quan", "1");
+        assertThat(b.loaiGiaoDich()).isEqualTo(LoaiGiaoDich.CHO_THUE);
+        assertThat(b.loaiBds()).isEqualTo(LoaiBds.PHONG_TRO);
+        assertThat(b.khuVuc()).isEqualTo("thu duc");
+        assertThat(b.cheDoGia()).isEqualTo(KieuGia.M2);
+        assertThat(b.giaMin()).isEqualByComparingTo("0");
+        assertThat(b.giaMax()).isEqualByComparingTo("200000.5");
+        assertThat(b.dienTichMin()).isEqualByComparingTo("10");
+        assertThat(b.dienTichMax()).isEqualByComparingTo("80");
+        assertThat(b.nam()).isEqualByComparingTo("10.5");
+        assertThat(b.dong()).isEqualByComparingTo("107.25");
+        assertThat(b.sapXep()).isEqualTo(SapXepTin.MOI_NHAT);
+        assertThat(b.trang()).isEqualTo(3);
+        assertThat(b.kichThuoc()).isEqualTo(50);
     }
 
     @Test
-    @DisplayName("Cursor: sai định dạng, khác sapXep hoặc khác bộ lọc nhận 400 trường cursor")
-    void cursorKhongHopLe() throws Exception {
-        String trang1 = mockMvc.perform(yeuCauGet("/api/listings?limit=2&khuVuc=A", null))
-                .andReturn().getResponse().getContentAsString();
-        String conTro = JsonPath.read(trang1, "$.conTroTiepTheo");
-
-        for (String xau : List.of("khong-phai-con-tro", conTro + "x", conTro.substring(0, conTro.length() - 3))) {
-            mockMvc.perform(yeuCauGet("/api/listings?limit=2&khuVuc=A&cursor=" + xau, null))
-                    .andExpect(status().isBadRequest())
-                    .andExpect(jsonPath("$.maLoi").value("DU_LIEU_KHONG_HOP_LE"))
-                    .andExpect(jsonPath("$.truongLoi[0].truong").value("cursor"));
-        }
-        mockMvc.perform(yeuCauGet("/api/listings?limit=2&khuVuc=B&cursor=" + conTro, null))
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.truongLoi[0].truong").value("cursor"));
-        mockMvc.perform(yeuCauGet("/api/listings?limit=2&khuVuc=A&sapXep=cu_nhat&cursor=" + conTro, null))
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.truongLoi[0].truong").value("cursor"));
+    @DisplayName("Tham số lạ (giaDen, cursor, limit) hoặc lặp lại nhận 400, không bị bỏ qua; kho không được gọi")
+    void thamSoLaHoacLap() throws Exception {
+        kiemTra400("/api/listings?loaiGiaoDich=ban&giaDen=0", "giaDen");
+        kiemTra400("/api/listings?cursor=abc", "cursor");
+        kiemTra400("/api/listings?limit=10", "limit");
+        kiemTra400("/api/listings?loaiBds=can_ho&loaiBds=dat", "loaiBds");
+        kiemTra400("/api/listings?trang=1&trang=2", "trang");
+        assertThat(khoGia.soLanGoi).isZero();
     }
 
     @Test
-    @DisplayName("400 với lỗi theo trường cho enum lạ, số sai, đảo khoảng, limit ngoài 1..50")
-    void loiDuLieu() throws Exception {
+    @DisplayName("400 cho enum lạ, sapXep ngoài mac_dinh/moi_nhat, số sai, trang/kichThuoc ngoài miền, độ dài vượt giới hạn")
+    void giaTriSai() throws Exception {
         kiemTra400("/api/listings?loaiGiaoDich=mua", "loaiGiaoDich");
-        kiemTra400("/api/listings?loaiBds=can_ho,biet_thu", "loaiBds");
-        kiemTra400("/api/listings?kieuGia=nghin", "kieuGia");
-        kiemTra400("/api/listings?sapXep=ngau_nhien", "sapXep");
-        kiemTra400("/api/listings?dienTichTu=-5", "dienTichTu");
-        kiemTra400("/api/listings?dienTichDen=abc", "dienTichDen");
-        kiemTra400("/api/listings?dienTichTu=1e3", "dienTichTu");
-        kiemTra400("/api/listings?dienTichTu=50&dienTichDen=40", "dienTichTu");
-        kiemTra400("/api/listings?loaiGiaoDich=ban&giaTu=-1", "giaTu");
-        kiemTra400("/api/listings?loaiGiaoDich=ban&giaTu=200&giaDen=100", "giaTu");
-        kiemTra400("/api/listings?loaiGiaoDich=ban&giaDen=NaN", "giaDen");
-        for (String limit : List.of("0", "51", "abc", "-3", "1.5")) {
-            kiemTra400("/api/listings?limit=" + limit, "limit");
+        kiemTra400("/api/listings?loaiBds=can_ho,dat", "loaiBds");
+        kiemTra400("/api/listings?cheDoGia=thang", "cheDoGia");
+        for (String sapXep : List.of("gia_tang", "dien_tich_giam", "cu_nhat")) {
+            kiemTra400("/api/listings?sapXep=" + sapXep, "sapXep");
         }
-        assertThat(khoGia.soLanDocTuNhien).isZero();
+        kiemTra400("/api/listings?dienTichMin=-1", "dienTichMin");
+        kiemTra400("/api/listings?dienTichMin=1e3", "dienTichMin");
+        kiemTra400("/api/listings?dienTichMin=01", "dienTichMin");
+        kiemTra400("/api/listings?trang=100001", "trang");
+        kiemTra400("/api/listings?trang=-1", "trang");
+        kiemTra400("/api/listings?kichThuoc=0", "kichThuoc");
+        kiemTra400("/api/listings?kichThuoc=51", "kichThuoc");
+        kiemTra400("/api/listings?tuKhoa=" + "a".repeat(101), "tuKhoa");
+        kiemTra400("/api/listings?tuKhoa=a b c d e f g h i j k", "tuKhoa");
+        kiemTra400("/api/listings?tuKhoa=?!...", "tuKhoa");
+        kiemTra400("/api/listings?khuVuc=" + "a".repeat(121), "khuVuc");
+        assertThat(khoGia.soLanGoi).isZero();
     }
 
     @Test
-    @DisplayName("Lọc hoặc sắp xếp theo giá mà thiếu loaiGiaoDich nhận 400 trường loaiGiaoDich; có loaiGiaoDich thì 200")
-    void giaCanLoaiGiaoDich() throws Exception {
-        kiemTra400("/api/listings?giaTu=100", "loaiGiaoDich");
-        kiemTra400("/api/listings?giaDen=100&kieuGia=m2", "loaiGiaoDich");
-        kiemTra400("/api/listings?sapXep=gia_tang", "loaiGiaoDich");
-        kiemTra400("/api/listings?sapXep=gia_giam", "loaiGiaoDich");
-        mockMvc.perform(yeuCauGet("/api/listings?loaiGiaoDich=ban&sapXep=gia_tang&giaTu=100", null))
+    @DisplayName("Cận giá cần loaiGiaoDich; khoảng đảo bị 400; tuKhoa/khuVuc chỉ khoảng trắng là không truyền")
+    void quyTacKhoang() throws Exception {
+        kiemTra400("/api/listings?giaMax=100", "loaiGiaoDich");
+        kiemTra400("/api/listings?loaiGiaoDich=ban&giaMin=5&giaMax=4", "giaMin");
+        kiemTra400("/api/listings?dienTichMin=5&dienTichMax=4", "dienTichMin");
+        mockMvc.perform(get("/api/listings")
+                        .param("loaiGiaoDich", "ban").param("giaMin", "4").param("giaMax", "4")
+                        .param("tuKhoa", "   ").param("khuVuc", " "))
                 .andExpect(status().isOk());
-        mockMvc.perform(yeuCauGet("/api/listings?sapXep=dien_tich_tang&dienTichTu=10", null))
-                .andExpect(status().isOk());
+        assertThat(khoGia.boLocCuoi.coTuKhoa()).isFalse();
+        assertThat(khoGia.boLocCuoi.khuVuc()).isNull();
     }
 
     @Test
-    @DisplayName("Nhiều lỗi được trả cùng lúc trong truongLoi")
-    void nhieuLoiCungLuc() throws Exception {
-        mockMvc.perform(yeuCauGet("/api/listings?limit=0&sapXep=x&loaiGiaoDich=mua", null))
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.truongLoi.length()").value(3));
+    @DisplayName("Vùng bản đồ: thiếu cận, ngoài miền, nam > bac, tay > dong (cắt kinh tuyến 180) đều 400")
+    void vungBanDo() throws Exception {
+        kiemTra400("/api/listings?nam=10&bac=11&tay=106", "dong");
+        kiemTra400("/api/listings?nam=-91&bac=11&tay=106&dong=107", "nam");
+        kiemTra400("/api/listings?nam=10&bac=11&tay=106&dong=181", "dong");
+        kiemTra400("/api/listings?nam=12&bac=11&tay=106&dong=107", "nam");
+        kiemTra400("/api/listings?nam=10&bac=11&tay=170&dong=-170", "tay");
+        mockMvc.perform(yeuCauGet("/api/listings?nam=-90&bac=90&tay=-180&dong=180", null))
+                .andExpect(status().isOk());
+        assertThat(khoGia.boLocCuoi.coVung()).isTrue();
     }
 
-    private void kiemTra400(String duongDan, String truongDau) throws Exception {
+    private void kiemTra400(String duongDan, String truong) throws Exception {
         mockMvc.perform(yeuCauGet(duongDan, null))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.maLoi").value("DU_LIEU_KHONG_HOP_LE"))
-                .andExpect(jsonPath("$.truongLoi[0].truong").value(truongDau));
+                .andExpect(jsonPath("$.truongLoi[*].truong", hasItem(truong)));
     }
 
     private MockHttpServletRequestBuilder yeuCauGet(String duongDan, String rawSessionCookie) {
@@ -286,57 +303,37 @@ class TimKiemTinApiTests {
         return config;
     }
 
-    /** Kho giả: một tin tài trợ và ba tin tự nhiên cố định; ghi lại tham số lần gọi cuối. */
+    /** Kho giả: một tin tự nhiên, một tin tài trợ, tổng số 42; ghi lại bộ lọc lần gọi cuối. */
     private static final class KhoGia implements TimKiemRepository {
 
-        int soLanDocTaiTro;
-        int soLanDocTuNhien;
+        int soLanGoi;
         BoLocTimKiem boLocCuoi;
-        SapXepTin sapXepCuoi;
-        ConTroTimKiem conTroCuoi;
-        int gioiHanCuoi;
+        int soTaiTroCuoi;
 
         @Override
-        public List<DongTin> docTaiTro(BoLocTimKiem boLoc, int toiDa) {
-            soLanDocTaiTro++;
+        public KetQua timKiem(BoLocTimKiem boLoc, int soTaiTroToiDa) {
+            soLanGoi++;
             boLocCuoi = boLoc;
-            return List.of(dong(9L, null));
+            soTaiTroCuoi = soTaiTroToiDa;
+            return new KetQua(List.of(dong(1L)), 42, List.of(dong(9L)), GOC);
         }
 
-        @Override
-        public List<DongTin> docTuNhien(
-                BoLocTimKiem boLoc,
-                SapXepTin sapXep,
-                ConTroTimKiem sau,
-                int toiDaTaiTro,
-                int gioiHan
-        ) {
-            soLanDocTuNhien++;
-            boLocCuoi = boLoc;
-            sapXepCuoi = sapXep;
-            conTroCuoi = sau;
-            gioiHanCuoi = gioiHan;
-            List<DongTin> tatCa = new ArrayList<>();
-            for (long i = 1; i <= 3; i++) {
-                tatCa.add(dong(i, "2026-11-18 03:00:0" + (4 - i) + "+00"));
-            }
-            return tatCa.subList(0, Math.min(gioiHan, tatCa.size()));
-        }
-
-        private static DongTin dong(long so, String khoa) {
+        private static DongTin dong(long so) {
             return new DongTin(
                     new UUID(0L, so),
+                    new UUID(1L, so),
                     "Tin " + so,
                     "ban",
                     "can_ho",
-                    "TP. Hồ Chí Minh",
-                    "12 Tôn Đức Thắng",
-                    new BigDecimal("2500000000"),
+                    new BigDecimal("100000000"),
                     "vnd_tong",
-                    new BigDecimal("68.5"),
-                    "anh/hien-thi-1.png",
+                    new BigDecimal("3"),
+                    "TP. Hồ Chí Minh",
+                    new BigDecimal("10.7772"),
+                    new BigDecimal("106.7015"),
                     GOC.minusSeconds(so),
-                    khoa
+                    new UUID(2L, so),
+                    1
             );
         }
     }

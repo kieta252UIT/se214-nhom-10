@@ -12,12 +12,7 @@ import org.springframework.stereotype.Repository;
 public class InMemoryChiTietTinRepository implements ChiTietTinRepository {
 
     @Override
-    public Optional<DongChiTiet> docChiTiet(UUID tinId, UUID nguoiXemId) {
-        return Optional.empty();
-    }
-
-    @Override
-    public Optional<DongLienHe> docLienHe(UUID tinId) {
+    public Optional<DongChiTiet> docChiTiet(UUID tinId) {
         return Optional.empty();
     }
 }

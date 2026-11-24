@@ -6,15 +6,17 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
-/** Đọc chi tiết và thông tin liên hệ của tin công khai (luôn là nội dung phiên bản ĐÃ DUYỆT). */
+/** Đọc chi tiết và liên hệ của tin công khai (BR-01), luôn là nội dung phiên bản ĐÃ DUYỆT. */
 public interface ChiTietTinRepository {
 
-    record AnhChiTiet(int thuTu, String khoaAnhHienThi) {
+    record AnhChiTiet(UUID id, int thuTu) {
     }
 
-    /** daLuu = null khi nguoiXemId = null (không tính trạng thái lưu). */
     record DongChiTiet(
             UUID tinId,
+            Instant ngayDang,
+            UUID phienBanId,
+            int soPhienBan,
             String tieuDe,
             String moTa,
             String loaiGiaoDich,
@@ -26,19 +28,13 @@ public interface ChiTietTinRepository {
             String khuVuc,
             BigDecimal viDo,
             BigDecimal kinhDo,
-            Instant ngayDang,
-            boolean laTaiTro,
-            Boolean daLuu,
+            Instant taoLuc,
+            String hoTen,
+            String soDienThoai,
             List<AnhChiTiet> anh
     ) {
     }
 
-    record DongLienHe(String hoTen, String soDienThoai) {
-    }
-
-    /** Empty nếu tin không tồn tại hoặc không công khai. nguoiXemId chỉ truyền khi người xem là nguoi_dung. */
-    Optional<DongChiTiet> docChiTiet(UUID tinId, UUID nguoiXemId);
-
-    /** Empty nếu tin không công khai hoặc tài khoản chủ tin bị khóa. */
-    Optional<DongLienHe> docLienHe(UUID tinId);
+    /** Empty nếu tin không tồn tại hoặc không công khai. */
+    Optional<DongChiTiet> docChiTiet(UUID tinId);
 }
