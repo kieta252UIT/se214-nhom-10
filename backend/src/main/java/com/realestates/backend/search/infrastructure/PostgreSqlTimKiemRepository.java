@@ -88,7 +88,7 @@ public class PostgreSqlTimKiemRepository implements TimKiemRepository {
             tham.addValue("loaiBds", boLoc.loaiBds().getGiaTri());
         }
         if (boLoc.khuVuc() != null) {
-            loc.append("\n      AND strpos(").append(ChuanHoaTimKiem.sql("p.khu_vuc || ' ' || p.dia_chi"))
+            loc.append("\n      AND strpos(").append(ChuanHoaTimKiem.sqlKhuVuc("p.khu_vuc || ' ' || p.dia_chi"))
                     .append(", :khuVuc) > 0");
             tham.addValue("khuVuc", boLoc.khuVuc());
         }
