@@ -188,6 +188,20 @@ class PostgreSqlTimKiemTinTests {
     }
 
     @Test
+    @DisplayName("khuVuc mục 4.1: dấu câu và nhiều khoảng trắng ở cả dữ liệu lẫn input đều quy về một khoảng trắng")
+    void khuVucBoDauCauVaKhoangTrang() {
+        String dau = kv + " TP. Thủ   Đức";
+        TinTao tin = ht.taoTinDaDuyet(new NoiDung("Nhà phố", "ban", "nha_rieng", "2000000000", "vnd_tong", "50", dau),
+                GOC.plusSeconds(1));
+
+        for (String input : new String[] {"tp thu duc", "TP.Thủ-Đức", "  tp,,  thu...duc  "}) {
+            assertThat(ids(tim("khuVuc", input).tuNhien().noiDung())).as(input).contains(tin.tinId());
+        }
+        assertThat(ids(tim("khuVuc", kv + " tp thu duc").tuNhien().noiDung())).containsExactly(tin.tinId());
+        assertThat(ids(tim("khuVuc", kv + " tpthu duc").tuNhien().noiDung())).isEmpty();
+    }
+
+    @Test
     @DisplayName("TK-06: lọc giá bằng phân số chính xác N/D, không làm tròn trước; 100.000.000 / 3 m2 không lọt cận 33.333.333,33")
     void locGiaChinhXacTaiBien() {
         TinTao tin = ht.taoTinDaDuyet(mau().voiBan("dat", "100000000", "vnd_tong", "3"), GOC.plusSeconds(1));

@@ -55,6 +55,16 @@ public final class ChuanHoaTimKiem {
         return ketQua.toString();
     }
 
+    /** Khu vực: chuẩn hóa rồi mỗi dãy ký tự ngoài [a-z0-9] thành một khoảng trắng, trim (khớp {@link #sqlKhuVuc}). */
+    public static String chuanHoaKhuVuc(String vanBan) {
+        return chuanHoa(vanBan).replaceAll("[^a-z0-9]+", " ").strip();
+    }
+
+    /** Bản SQL của {@link #chuanHoaKhuVuc}; bieuThuc do mã cung cấp. */
+    public static String sqlKhuVuc(String bieuThuc) {
+        return "btrim(regexp_replace(" + sql(bieuThuc) + ", '[^a-z0-9]+', ' ', 'g'))";
+    }
+
     /** Các từ khác nhau (chữ/số liên tiếp) của văn bản đã chuẩn hóa, giữ thứ tự xuất hiện. */
     public static List<String> tachTu(String daChuanHoa) {
         Set<String> tu = new LinkedHashSet<>();

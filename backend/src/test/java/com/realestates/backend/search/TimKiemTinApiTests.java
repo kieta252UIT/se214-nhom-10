@@ -146,7 +146,7 @@ class TimKiemTinApiTests {
                         .param("tuKhoa", "  Căn Hộ Quận 1 căn ")
                         .param("loaiGiaoDich", "cho_thue")
                         .param("loaiBds", "phong_tro")
-                        .param("khuVuc", "Thủ Đức")
+                        .param("khuVuc", "  TP.  Thủ---Đức!! ")
                         .param("cheDoGia", "m2")
                         .param("giaMin", "0")
                         .param("giaMax", "200000.5")
@@ -166,7 +166,7 @@ class TimKiemTinApiTests {
         assertThat(b.tuKhoa()).containsExactly("can", "ho", "quan", "1");
         assertThat(b.loaiGiaoDich()).isEqualTo(LoaiGiaoDich.CHO_THUE);
         assertThat(b.loaiBds()).isEqualTo(LoaiBds.PHONG_TRO);
-        assertThat(b.khuVuc()).isEqualTo("thu duc");
+        assertThat(b.khuVuc()).isEqualTo("tp thu duc");
         assertThat(b.cheDoGia()).isEqualTo(KieuGia.M2);
         assertThat(b.giaMin()).isEqualByComparingTo("0");
         assertThat(b.giaMax()).isEqualByComparingTo("200000.5");
@@ -224,6 +224,9 @@ class TimKiemTinApiTests {
                         .param("tuKhoa", "   ").param("khuVuc", " "))
                 .andExpect(status().isOk());
         assertThat(khoGia.boLocCuoi.coTuKhoa()).isFalse();
+        assertThat(khoGia.boLocCuoi.khuVuc()).isNull();
+
+        mockMvc.perform(get("/api/listings").param("khuVuc", " .,-!! ")).andExpect(status().isOk());
         assertThat(khoGia.boLocCuoi.khuVuc()).isNull();
     }
 

@@ -208,7 +208,8 @@ public class TimKiemTinService {
             loi.add(loiTruong("khuVuc", "khuVuc tối đa " + DO_DAI_KHU_VUC_TOI_DA + " ký tự."));
             return null;
         }
-        return ChuanHoaTimKiem.chuanHoa(giaTri);
+        String chuan = ChuanHoaTimKiem.chuanHoaKhuVuc(giaTri);
+        return chuan.isEmpty() ? null : chuan;
     }
 
     private static <T> T docEnum(
