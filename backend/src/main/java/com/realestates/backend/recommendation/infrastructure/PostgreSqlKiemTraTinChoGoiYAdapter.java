@@ -47,6 +47,7 @@ public class PostgreSqlKiemTraTinChoGoiYAdapter implements KiemTraTinChoGoiYPort
         BigDecimal giaGoc = rs.getBigDecimal("gia_goc");
         String donViGia = rs.getString("don_vi_gia");
         BigDecimal dienTichM2 = rs.getBigDecimal("dien_tich_m2");
+
         BigDecimal giaTongChuan = giaGoc;
         BigDecimal giaM2Chuan = giaGoc;
         if (giaGoc != null && dienTichM2 != null && dienTichM2.compareTo(BigDecimal.ZERO) > 0) {
@@ -124,8 +125,8 @@ public class PostgreSqlKiemTraTinChoGoiYAdapter implements KiemTraTinChoGoiYPort
         buildFilterSql(sql, params, tieuChi);
 
         sql.append(" ORDER BY t.ngay_dang DESC LIMIT 200");
-        List<ThongTinTinGoiY> ketQua = jdbcTemplate.query(sql.toString(), ROW_MAPPER, params.toArray());
-        return locTheoGia(ketQua, tieuChi);
+        List<ThongTinTinGoiY> danhSach = jdbcTemplate.query(sql.toString(), ROW_MAPPER, params.toArray());
+        return locTheoGiaNeuCo(danhSach, tieuChi);
     }
 
     @Override
@@ -163,27 +164,24 @@ public class PostgreSqlKiemTraTinChoGoiYAdapter implements KiemTraTinChoGoiYPort
         buildFilterSql(sql, params, tieuChi);
 
         sql.append(" LIMIT 50");
-        List<ThongTinTinGoiY> ketQua = jdbcTemplate.query(sql.toString(), ROW_MAPPER, params.toArray());
-        return locTheoGia(ketQua, tieuChi);
+        List<ThongTinTinGoiY> danhSach = jdbcTemplate.query(sql.toString(), ROW_MAPPER, params.toArray());
+        return locTheoGiaNeuCo(danhSach, tieuChi);
     }
 
-    private List<ThongTinTinGoiY> locTheoGia(List<ThongTinTinGoiY> danhSach, TieuChiGoiY tieuChi) {
-        if (tieuChi == null || (tieuChi.giaMinVnd() == null && tieuChi.giaMaxVnd() == null)) {
-            return danhSach;
+    @Override
+    public boolean kiemTraTinHopLeCongKhai(UUID tinId, Instant now) {
+        if (tinId == null) {
+            return false;
         }
-        return danhSach.stream()
-                .filter(t -> {
-                    if (tieuChi.giaMinVnd() != null && t.giaTongChuan() != null
-                            && t.giaTongChuan().compareTo(tieuChi.giaMinVnd()) < 0) {
-                        return false;
-                    }
-                    if (tieuChi.giaMaxVnd() != null && t.giaTongChuan() != null
-                            && t.giaTongChuan().compareTo(tieuChi.giaMaxVnd()) > 0) {
-                        return false;
-                    }
-                    return true;
-                })
-                .toList();
+        String sql = """
+                SELECT EXISTS (
+                    SELECT 1 FROM se214.tin_bat_dong_san t
+                    JOIN se214.tai_khoan tk ON tk.id = t.chu_id
+                    WHERE t.id = ? AND t.trang_thai = 'da_duyet' AND tk.trang_thai = 'hoat_dong'
+                )
+                """;
+        Boolean exists = jdbcTemplate.queryForObject(sql, Boolean.class, tinId);
+        return Boolean.TRUE.equals(exists);
     }
 
     private void buildFilterSql(StringBuilder sql, List<Object> params, TieuChiGoiY tieuChi) {
@@ -205,5 +203,24 @@ public class PostgreSqlKiemTraTinChoGoiYAdapter implements KiemTraTinChoGoiYPort
             sql.append(" AND pb.khu_vuc = ?");
             params.add(tieuChi.khuVuc());
         }
+    }
+
+    private List<ThongTinTinGoiY> locTheoGiaNeuCo(List<ThongTinTinGoiY> danhSach, TieuChiGoiY tieuChi) {
+        if (tieuChi == null || (tieuChi.giaMinVnd() == null && tieuChi.giaMaxVnd() == null)) {
+            return danhSach;
+        }
+        return danhSach.stream()
+                .filter(tin -> {
+                    if (tieuChi.giaMinVnd() != null && tin.giaTongChuan() != null
+                            && tin.giaTongChuan().compareTo(tieuChi.giaMinVnd()) < 0) {
+                        return false;
+                    }
+                    if (tieuChi.giaMaxVnd() != null && tin.giaTongChuan() != null
+                            && tin.giaTongChuan().compareTo(tieuChi.giaMaxVnd()) > 0) {
+                        return false;
+                    }
+                    return true;
+                })
+                .toList();
     }
 }

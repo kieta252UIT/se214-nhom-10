@@ -17,7 +17,7 @@ import org.springframework.transaction.annotation.Transactional;
 /**
  * Cấp độ 2: Kiểm thử tích hợp cơ sở dữ liệu (Database Integration Testing) theo IEEE 829 - Mục 7.2.
  * Kiểm tra:
- * - Flyway Migration khởi tạo schema se214 đầy đủ 15 bảng (12 bảng Sprint 1 + 3 bảng Gợi ý / Job Lease Sprint 2).
+ * - Flyway Migration khởi tạo schema se214 đầy đủ 12 bảng.
  * - Ràng buộc toàn vẹn: CHECK (hạn mức <= 3, BR-09), Unique index, Foreign Key.
  * - Giao dịch ACID và cơ chế Transaction Rollback.
  */
